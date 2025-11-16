@@ -298,6 +298,7 @@ func (r *IndexRepositoryR) SearchByProduct(ctx context.Context, productID uuid.U
 	results := make([]*models.SearchResult, 0, len(rows))
 	for _, row := range rows {
 		results = append(results, &models.SearchResult{
+			ChunkID:   PgtypeToUUID(row.ChunkID),
 			FilePath:  row.Path,
 			StartLine: int(row.StartLine),
 			EndLine:   int(row.EndLine),
@@ -325,6 +326,7 @@ func (r *IndexRepositoryR) SearchBySource(ctx context.Context, sourceID uuid.UUI
 	results := make([]*models.SearchResult, 0, len(rows))
 	for _, row := range rows {
 		results = append(results, &models.SearchResult{
+			ChunkID:   PgtypeToUUID(row.ChunkID),
 			FilePath:  row.Path,
 			StartLine: int(row.StartLine),
 			EndLine:   int(row.EndLine),

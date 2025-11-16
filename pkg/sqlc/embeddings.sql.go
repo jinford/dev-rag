@@ -64,7 +64,14 @@ func (q *Queries) GetEmbedding(ctx context.Context, chunkID pgtype.UUID) (Embedd
 }
 
 const searchChunksByProduct = `-- name: SearchChunksByProduct :many
+WITH latest_snapshots AS (
+    SELECT DISTINCT ON (source_id) id, source_id
+    FROM source_snapshots
+    WHERE indexed = TRUE
+    ORDER BY source_id, indexed_at DESC NULLS LAST, created_at DESC
+)
 SELECT
+    c.id AS chunk_id,
     f.path,
     c.start_line,
     c.end_line,
@@ -73,8 +80,8 @@ SELECT
 FROM embeddings e
 INNER JOIN chunks c ON e.chunk_id = c.id
 INNER JOIN files f ON c.file_id = f.id
-INNER JOIN source_snapshots ss ON f.snapshot_id = ss.id
-INNER JOIN sources s ON ss.source_id = s.id
+INNER JOIN latest_snapshots ls ON f.snapshot_id = ls.id
+INNER JOIN sources s ON ls.source_id = s.id
 WHERE s.product_id = $2
   AND ($3::text IS NULL OR f.path LIKE ($3::text || '%'))
   AND ($4::text IS NULL OR f.content_type = $4::text)
@@ -91,11 +98,12 @@ type SearchChunksByProductParams struct {
 }
 
 type SearchChunksByProductRow struct {
-	Path      string  `json:"path"`
-	StartLine int32   `json:"start_line"`
-	EndLine   int32   `json:"end_line"`
-	Content   string  `json:"content"`
-	Score     float64 `json:"score"`
+	ChunkID   pgtype.UUID `json:"chunk_id"`
+	Path      string      `json:"path"`
+	StartLine int32       `json:"start_line"`
+	EndLine   int32       `json:"end_line"`
+	Content   string      `json:"content"`
+	Score     float64     `json:"score"`
 }
 
 func (q *Queries) SearchChunksByProduct(ctx context.Context, arg SearchChunksByProductParams) ([]SearchChunksByProductRow, error) {
@@ -114,6 +122,7 @@ func (q *Queries) SearchChunksByProduct(ctx context.Context, arg SearchChunksByP
 	for rows.Next() {
 		var i SearchChunksByProductRow
 		if err := rows.Scan(
+			&i.ChunkID,
 			&i.Path,
 			&i.StartLine,
 			&i.EndLine,
@@ -131,7 +140,16 @@ func (q *Queries) SearchChunksByProduct(ctx context.Context, arg SearchChunksByP
 }
 
 const searchChunksBySource = `-- name: SearchChunksBySource :many
+WITH latest_snapshot AS (
+    SELECT id
+    FROM source_snapshots
+    WHERE source_id = $5
+      AND indexed = TRUE
+    ORDER BY indexed_at DESC NULLS LAST, created_at DESC
+    LIMIT 1
+)
 SELECT
+    c.id AS chunk_id,
     f.path,
     c.start_line,
     c.end_line,
@@ -140,37 +158,37 @@ SELECT
 FROM embeddings e
 INNER JOIN chunks c ON e.chunk_id = c.id
 INNER JOIN files f ON c.file_id = f.id
-INNER JOIN source_snapshots ss ON f.snapshot_id = ss.id
-WHERE ss.source_id = $2
-  AND ($3::text IS NULL OR f.path LIKE ($3::text || '%'))
-  AND ($4::text IS NULL OR f.content_type = $4::text)
+INNER JOIN latest_snapshot ls ON f.snapshot_id = ls.id
+WHERE ($2::text IS NULL OR f.path LIKE ($2::text || '%'))
+  AND ($3::text IS NULL OR f.content_type = $3::text)
 ORDER BY e.vector <=> $1::vector
-LIMIT $5
+LIMIT $4
 `
 
 type SearchChunksBySourceParams struct {
 	QueryVector pgvector_go.Vector `json:"query_vector"`
-	SourceID    pgtype.UUID        `json:"source_id"`
 	PathPrefix  pgtype.Text        `json:"path_prefix"`
 	ContentType pgtype.Text        `json:"content_type"`
 	RowLimit    int32              `json:"row_limit"`
+	SourceID    pgtype.UUID        `json:"source_id"`
 }
 
 type SearchChunksBySourceRow struct {
-	Path      string  `json:"path"`
-	StartLine int32   `json:"start_line"`
-	EndLine   int32   `json:"end_line"`
-	Content   string  `json:"content"`
-	Score     float64 `json:"score"`
+	ChunkID   pgtype.UUID `json:"chunk_id"`
+	Path      string      `json:"path"`
+	StartLine int32       `json:"start_line"`
+	EndLine   int32       `json:"end_line"`
+	Content   string      `json:"content"`
+	Score     float64     `json:"score"`
 }
 
 func (q *Queries) SearchChunksBySource(ctx context.Context, arg SearchChunksBySourceParams) ([]SearchChunksBySourceRow, error) {
 	rows, err := q.db.Query(ctx, searchChunksBySource,
 		arg.QueryVector,
-		arg.SourceID,
 		arg.PathPrefix,
 		arg.ContentType,
 		arg.RowLimit,
+		arg.SourceID,
 	)
 	if err != nil {
 		return nil, err
@@ -180,6 +198,7 @@ func (q *Queries) SearchChunksBySource(ctx context.Context, arg SearchChunksBySo
 	for rows.Next() {
 		var i SearchChunksBySourceRow
 		if err := rows.Scan(
+			&i.ChunkID,
 			&i.Path,
 			&i.StartLine,
 			&i.EndLine,

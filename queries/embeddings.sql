@@ -23,7 +23,14 @@ DELETE FROM embeddings
 WHERE chunk_id = $1;
 
 -- name: SearchChunksByProduct :many
+WITH latest_snapshots AS (
+    SELECT DISTINCT ON (source_id) id, source_id
+    FROM source_snapshots
+    WHERE indexed = TRUE
+    ORDER BY source_id, indexed_at DESC NULLS LAST, created_at DESC
+)
 SELECT
+    c.id AS chunk_id,
     f.path,
     c.start_line,
     c.end_line,
@@ -32,8 +39,8 @@ SELECT
 FROM embeddings e
 INNER JOIN chunks c ON e.chunk_id = c.id
 INNER JOIN files f ON c.file_id = f.id
-INNER JOIN source_snapshots ss ON f.snapshot_id = ss.id
-INNER JOIN sources s ON ss.source_id = s.id
+INNER JOIN latest_snapshots ls ON f.snapshot_id = ls.id
+INNER JOIN sources s ON ls.source_id = s.id
 WHERE s.product_id = sqlc.arg(product_id)
   AND (sqlc.narg(path_prefix)::text IS NULL OR f.path LIKE (sqlc.narg(path_prefix)::text || '%'))
   AND (sqlc.narg(content_type)::text IS NULL OR f.content_type = sqlc.narg(content_type)::text)
@@ -41,7 +48,16 @@ ORDER BY e.vector <=> sqlc.arg(query_vector)::vector
 LIMIT sqlc.arg(row_limit);
 
 -- name: SearchChunksBySource :many
+WITH latest_snapshot AS (
+    SELECT id
+    FROM source_snapshots
+    WHERE source_id = sqlc.arg(source_id)
+      AND indexed = TRUE
+    ORDER BY indexed_at DESC NULLS LAST, created_at DESC
+    LIMIT 1
+)
 SELECT
+    c.id AS chunk_id,
     f.path,
     c.start_line,
     c.end_line,
@@ -50,9 +66,8 @@ SELECT
 FROM embeddings e
 INNER JOIN chunks c ON e.chunk_id = c.id
 INNER JOIN files f ON c.file_id = f.id
-INNER JOIN source_snapshots ss ON f.snapshot_id = ss.id
-WHERE ss.source_id = sqlc.arg(source_id)
-  AND (sqlc.narg(path_prefix)::text IS NULL OR f.path LIKE (sqlc.narg(path_prefix)::text || '%'))
+INNER JOIN latest_snapshot ls ON f.snapshot_id = ls.id
+WHERE (sqlc.narg(path_prefix)::text IS NULL OR f.path LIKE (sqlc.narg(path_prefix)::text || '%'))
   AND (sqlc.narg(content_type)::text IS NULL OR f.content_type = sqlc.narg(content_type)::text)
 ORDER BY e.vector <=> sqlc.arg(query_vector)::vector
 LIMIT sqlc.arg(row_limit);
