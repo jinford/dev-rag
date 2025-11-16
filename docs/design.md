@@ -36,7 +36,7 @@ graph TB
         Wikis[/var/lib/dev-rag/wikis]
     end
 
-    CI_Pipeline -->|POST /api/v1/repos/:name/index| HTTPServer
+    CI_Pipeline -->|POST /api/v1/sources/index| HTTPServer
     NextJS -->|GET/POST /api/v1/*| HTTPServer
     HTTPServer -->|trigger| Indexer
     HTTPServer -->|trigger| WikiGen
@@ -148,8 +148,9 @@ dev-rag/
 
 ```mermaid
 erDiagram
-    repositories ||--o{ snapshots : "has"
-    snapshots ||--o{ files : "contains"
+    products ||--o{ sources : "has"
+    sources ||--o{ source_snapshots : "has"
+    source_snapshots ||--o{ files : "contains"
     files ||--o{ chunks : "split into"
     chunks ||--|| embeddings : "has"
 ```
@@ -158,19 +159,29 @@ erDiagram
 
 詳細なスキーマ定義は [database-schema.md](database-schema.md) を参照。
 
-#### repositories
-- リポジトリの基本情報（名前、URL、デフォルトブランチ）
+#### products（プロダクト）
+- プロダクトの基本情報（名前、説明）
+- 複数のソースをグループ化する単位
 - 一意制約: name
+- **Wiki生成はプロダクト単位で行うことを推奨**
 
-#### snapshots
-- リポジトリの特定コミット時点のスナップショット
-- 一意制約: (repository_id, commit_hash)
+#### sources（情報ソース）
+- 情報ソースの基本情報（名前、ソースタイプ、メタデータ）
+- ソースタイプ: git, confluence, pdf, redmine, notion, local
+- 一意制約: name
+- 外部キー: product_id (products.id) - 1つのプロダクトに複数のソースを紐付け可能
+- **初期フェーズでは git のみを実装**
+
+#### source_snapshots（ソーススナップショット）
+- ソースの特定バージョン時点のスナップショット
+- 一意制約: (source_id, version_identifier)
+- バージョン識別子: Gitの場合はcommit_hash、Confluenceの場合はpage_version等
 - インデックス済みフラグと完了日時を管理
 
-#### files
-- スナップショット内のファイル情報
+#### files（ファイル・ドキュメント）
+- スナップショット内のファイル・ドキュメント情報
 - ファイル内容のハッシュ（SHA-256）を保持
-- ソース種別（code/doc/wiki）で分類
+- MIMEタイプ形式でコンテンツ種別を保持（例: text/x-go, text/markdown, application/pdf）
 
 #### chunks
 - ファイルを分割したチャンク
@@ -187,41 +198,86 @@ erDiagram
 
 ### 3.1 CLI コマンド仕様
 
-#### 3.1.1 index コマンド
+#### 3.1.1 product コマンド
 
-**目的:** リポジトリをインデックス化する（リポジトリ自動登録含む）
+**目的:** プロダクトを管理する
 
-**コマンド:**
+**サブコマンド:**
+
+##### product list
 ```bash
-dev-rag index --url <git-url> [options]
+dev-rag product list
+```
+
+プロダクト一覧を表示
+
+##### product show
+```bash
+dev-rag product show --name <product-name>
+```
+
+プロダクト詳細と所属ソース一覧を表示
+
+#### 3.1.2 source コマンド
+
+**目的:** ソースメタデータを管理する（一覧・詳細表示）
+
+**サブコマンド:**
+
+##### source list
+```bash
+dev-rag source list [--product <product-name>]
+```
+
+ソース一覧を表示（プロダクト指定で絞り込み可能）
+
+##### source show
+```bash
+dev-rag source show --name <source-name>
+```
+
+ソース詳細を表示
+
+> インデックス作成は `index` コマンドで実行する
+
+#### 3.1.3 index コマンド
+
+**目的:** 各種ソースのインデックス化を実行する
+
+**サブコマンド:**
+
+##### index git
+```bash
+dev-rag index git --url <git-url> --name <source-name> --product <product-name> [options]
 ```
 
 **オプション:**
 - `--url`: GitリポジトリURL（必須）
-- `--name`: リポジトリ名（省略時はURLから自動生成）
-- `--ref`: ブランチ名またはタグ名（省略時はリモートのデフォルトブランチを自動検出）
+- `--name`: ソース名（省略時は Git URL の末尾から自動決定）
+- `--product`: プロダクト名（**必須**、プロダクトが存在しない場合は自動作成される）
+- `--ref`: ブランチ名またはタグ名（省略時はリモートのdefault_branch）
 - `--force-init`: 強制的にフルインデックスを実行（既存データを削除して再構築）
-- `--include`: 対象ソース種別（code/doc/wiki、複数指定可能、デフォルトは全種別）
 
 **動作:**
 
-1. **リポジトリ自動登録・更新**
-   - URLでリポジトリを検索し、存在すれば更新、なければ新規作成
-   - リポジトリ名は `--name` で指定するか、URLから自動生成
+1. **プロダクト自動作成・ソース登録/更新**
+   - プロダクトが存在しない場合は自動作成される
+   - ソース名で検索し、存在すれば更新、なければ新規作成
+   - メタデータに `{"url": "<git-url>", "default_branch": "<branch>"}` を保存
 
 2. **インデックス処理（自動判断）**
    - デフォルト: 前回スナップショットがあれば差分更新、なければフルインデックス
    - `--force-init` 指定時: 既存データを削除して強制的にフルインデックス
 
 3. **処理フロー**
-   - Git clone/pull (`/var/lib/dev-rag/repos/` 配下)
+   - Git clone/pull (`/var/lib/dev-rag/sources/<source-name>` 配下)
    - ファイル一覧取得（除外ルール適用: .gitignore → .devragignore）
    - チャンク化
    - Embedding生成（OpenAI API）
    - DB保存
 
 4. **差分更新の仕組み**
-   - 同一リポジトリ・同一参照で最後に成功したスナップショットを検索
+   - 同一ソース・同一参照で最後に成功したスナップショットを検索
    - ファイルの `content_hash` で変更検出
    - 差分判定の詳細:
      - **新規ファイル**: 前回に存在しない → インデックス作成
@@ -229,36 +285,64 @@ dev-rag index --url <git-url> [options]
      - **変更ファイル**: content_hashが異なる → chunks/embeddings削除後、再インデックス
      - **リネーム**: 削除+追加として扱う（ハッシュ一致でも再インデックス）
 
-#### 3.1.2 wiki generate コマンド
+**使用例:**
+```bash
+# ECサイトプロダクトにバックエンドとフロントエンドのGitソースを登録してインデックス
+dev-rag index git --url git@gitlab.com:company/backend.git --name backend-api --product ecommerce
+dev-rag index git --url git@gitlab.com:company/frontend.git --name frontend-web --product ecommerce
+dev-rag index git --url git@gitlab.com:company/infra.git --name infra --product ecommerce
+```
 
-**目的:** インデックスを元にMarkdown形式のWikiを生成する
+##### index confluence（将来実装）
+```bash
+dev-rag index confluence --name <source-name> --product <product-name> [options]
+```
+
+##### index pdf（将来実装）
+```bash
+dev-rag index pdf --name <source-name> --product <product-name> [options]
+```
+
+#### 3.1.4 wiki generate コマンド
+
+**目的:** プロダクト単位でMarkdown形式のWikiを生成する
 
 **コマンド:**
 ```bash
-dev-rag wiki generate --repo <repo-name> [options]
+dev-rag wiki generate --product <product-name> [options]
 ```
 
 **オプション:**
-- `--repo`: 対象リポジトリ名（必須）
-- `--ref`: 参照するブランチ/コミット（省略時はリポジトリのdefault_branch）
-- `--out`: 出力ディレクトリ（省略時は `/var/lib/dev-rag/wikis/<repo-name>`）
+- `--product`: プロダクト名（必須）
+- `--out`: 出力ディレクトリ（省略時は `/var/lib/dev-rag/wikis/<product-name>`）
 - `--config`: Wiki生成設定ファイル（省略時はデフォルト設定を使用）
 
 **動作:**
 
-1. **ベクトル検索**
-   - 設定ファイルで定義されたページごとにクエリを実行
-   - 関連するチャンクを取得（Top-K）
+1. **プロダクト情報取得**
+   - プロダクトに属する全ソースを取得
+   - 各ソースの最新インデックス済みスナップショットを取得
 
-2. **LLM生成**
+2. **ベクトル検索（プロダクト横断）**
+   - 設定ファイルで定義されたページごとにクエリを実行
+   - プロダクトの全ソースから関連するチャンクを取得（Top-K）
+   - 各ソースの最新インデックス済みスナップショットを対象とする
+
+3. **LLM生成**
    - 取得したチャンクをコンテキストとしてLLMに渡す
    - Markdown形式（Mermaid図を含む）で生成
 
-3. **ファイル出力**
-   - `/var/lib/dev-rag/wikis/<repo-name>/` ディレクトリに出力
+4. **ファイル出力**
+   - `/var/lib/dev-rag/wikis/<product-name>/` ディレクトリに出力
    - 既存ファイルは強制上書き（再現性保証）
 
-#### 3.1.3 server start コマンド
+**使用例:**
+```bash
+# ECサイトプロダクトのWikiを生成（各ソースの最新スナップショットを使用）
+dev-rag wiki generate --product ecommerce
+```
+
+#### 3.1.5 server start コマンド
 
 **目的:** HTTP サーバを起動する
 
@@ -328,13 +412,14 @@ dev-rag server start [options]
 #### 3.3.1 検索要件
 
 **必須機能:**
-- リポジトリ・参照（ブランチ/コミット）でフィルタリング
+- プロダクト単位またはソース単位でフィルタリング
+- 参照（ブランチ/コミット/バージョン）でフィルタリング
 - クエリ文字列からベクトル検索
 - 結果件数の制限（Top-K）
 
 **オプション機能:**
 - パスプレフィックスでフィルタ
-- ソース種別でフィルタ
+- コンテンツタイプでフィルタ（MIMEタイプ: text/x-go, text/markdown等）
 - 前後のチャンクをコンテキストとして取得
 
 #### 3.3.2 検索結果
@@ -370,29 +455,29 @@ dev-rag server start [options]
 以下のページを生成する：
 
 1. **index.md（概要ページ）:**
-   - 内容: リポジトリ概要、目次、主要コンポーネントサマリー
-   - 疑似クエリ: 「このリポジトリの目的、主要機能、技術スタック、ディレクトリ構成を説明する」
+   - 内容: プロダクト/ソース概要、目次、主要コンポーネントサマリー
+   - 疑似クエリ: 「このプロダクト/ソースの目的、主要機能、技術スタック、ディレクトリ構成を説明する」
    - 検索チャンク数: 20
-   - 検索対象: 全ファイル
-   - 必須要素: 最新コミット情報（ハッシュ、日時、メッセージ）
+   - 検索対象: 全ファイル（プロダクトの場合は全ソース横断）
+   - 必須要素: 最新バージョン情報（Gitの場合はコミットハッシュ、日時、メッセージ）
 
 2. **architecture.md（アーキテクチャページ）:**
    - 内容: システム全体構成、依存関係、メッセージフロー
    - 疑似クエリ: 「システムアーキテクチャ、コンポーネント間の依存関係、データフロー、技術的な設計判断を説明する」
    - 検索チャンク数: 25
-   - 検索対象: 全ファイル
+   - 検索対象: 全ファイル（プロダクトの場合は全ソース横断）
    - 必須要素: Mermaid図（flowchart/sequence等）を最低1つ含む
 
-3. **features/<feature-name>.md（機能別詳細）:**
+3. **features/<feature-name>.md（機能別詳細、Gitソースの場合）:**
    - 内容: 各機能ごとの責務、主なファイル
    - 疑似クエリ: 「<機能名>の責務、実装詳細、関連ファイル、処理フローを説明する」
    - 検索チャンク数: 15
-   - 検索対象: 該当機能のディレクトリ配下（パスフィルタ使用）、ソース種別=code
+   - 検索対象: 該当機能のディレクトリ配下（パスフィルタ使用）、コンテンツタイプ=ソースコード系（text/x-*）
    - 推奨要素: 機能内のフローを表したMermaid図
 
-**機能別ページの対象:**
-- リポジトリの主要ディレクトリ（例: `pkg/indexer`, `pkg/search`, `pkg/wiki`等）ごとに1ページ生成
-- 対象ディレクトリは、リポジトリ構造を解析して自動的に判定するか、設定で指定可能
+**機能別ページの対象（Gitソースの場合）:**
+- ソースの主要ディレクトリ（例: `pkg/indexer`, `pkg/search`, `pkg/wiki`等）ごとに1ページ生成
+- 対象ディレクトリは、ソース構造を解析して自動的に判定するか、設定で指定可能
 
 **疑似クエリ（Pseudo Query）の活用:**
 - 単純な検索語ではなく、生成したい内容を表現する文章をクエリとして使用
@@ -403,7 +488,7 @@ dev-rag server start [options]
 **システムプロンプトの構造:**
 ```
 <role>
-あなたはリポジトリ{repo_name}の専門的なコード分析者です。
+あなたは{target_name}（プロダクトまたはソース）の専門的なコード分析者です。
 提供された情報を元に、日本語で正確で包括的なドキュメントを作成します。
 </role>
 
@@ -478,21 +563,24 @@ dev-rag server start [options]
 
 HTTPサーバは以下のカテゴリのREST APIを提供する：
 
-1. **非同期処理トリガー**
-   - `POST /api/v1/repos/:name/index`: インデックス更新
-   - `POST /api/v1/repos/:name/wiki`: Wiki生成
+1. **プロダクト・ソース情報**
+  - `GET /api/v1/products`: プロダクト一覧
+  - `GET /api/v1/products/:productId`: プロダクト詳細
+  - `GET /api/v1/sources`: ソース一覧
+  - `GET /api/v1/sources/:sourceId`: ソース詳細
+  - `GET /api/v1/products/:productId/sources`: プロダクト配下のソース一覧
 
-2. **ジョブ管理**
+2. **非同期処理トリガー**
+  - `POST /api/v1/sources/index`: ソースインデックス更新（ボディで `sourceName` を指定）
+  - `POST /api/v1/products/wiki`: プロダクトWiki生成（ボディで `productName` を指定）
+
+3. **ジョブ管理**
    - `GET /api/v1/jobs/:jobID`: ジョブステータス確認
 
-3. **リポジトリ情報**
-   - `GET /api/v1/repos`: リポジトリ一覧
-   - `GET /api/v1/repos/:name`: リポジトリ詳細
-
-4. **Wiki情報・ファイル取得**
-   - `GET /api/v1/repos/:name/wiki`: Wiki情報
-   - `GET /api/v1/repos/:name/wiki/files`: Wikiファイル一覧
-   - `GET /api/v1/repos/:name/wiki/files/:path`: Wikiファイル取得
+4. **Wiki情報・ファイル取得（プロダクト単位のみ）**
+  - `GET /api/v1/products/:productId/wiki`: プロダクトWiki情報
+  - `GET /api/v1/products/:productId/wiki/files`: プロダクトWikiファイル一覧
+  - `GET /api/v1/products/:productId/wiki/files/:path`: プロダクトWikiファイル取得
 
 詳細な仕様（リクエスト/レスポンス形式、エラーハンドリング等）は [api-interface.md](api-interface.md) を参照。
 
@@ -513,12 +601,6 @@ HTTPサーバは以下のカテゴリのREST APIを提供する：
 
 - Bearer Token 認証
 - トークンは環境変数 `DEVRAG_API_TOKEN` で設定
-
-### 4.4 JSON命名規約
-
-Go命名規約に準拠：
-- 頭字語は大文字: `jobID`, `repoURL`, `apiKey`, `baseURL`
-- それ以外はキャメルケース: `repoName`, `commitHash`, `generateWiki`
 
 ---
 
@@ -562,22 +644,6 @@ WIKI_OUTPUT_DIR=/var/lib/dev-rag/wikis
 
 # Server
 HTTP_PORT=8080
-```
-
-**リポジトリ固有の設定:**
-
-インデックス対象外ファイルの除外ルール:
-1. `.gitignore` のパターンを先に適用（Git管理外ファイルを除外）
-2. `.devragignore` のパターンを追加で適用（RAG特有の除外）
-3. 除外優先順位: .gitignore → .devragignore
-
-`.devragignore` ファイル例:
-```
-# .gitignore に加えて除外するパターン
-node_modules/
-dist/
-*.log
-.git/
 ```
 
 ### 4.2 エラーハンドリング
@@ -627,10 +693,11 @@ trigger-devrag:
   script:
     - |
       # dev-rag サーバの REST API を呼び出し
-      curl -X POST http://devrag.example.com:8080/api/v1/repos/myapp/index \
+      curl -X POST http://devrag.example.com:8080/api/v1/sources/index \
         -H "Authorization: Bearer $DEVRAG_API_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{
+          "sourceName": "backend-api",
           "ref": "main",
           "commitHash": "'$CI_COMMIT_SHA'",
           "generateWiki": true
@@ -782,3 +849,8 @@ GIT_SSH_KNOWN_HOSTS=/etc/dev-rag/ssh/known_hosts
 - 本設計書は方針を示すものであり、実装の自由度を妨げるものではない
 - 実装者は、本設計の意図を理解した上で、最適な実装方法を選択すること
 - コード例は参考程度とし、実際の実装とは異なってもよい
+
+**データモデルについて:**
+- データモデルは複数の情報ソース（Git、Confluence、PDF等）に対応できる汎用的な設計
+- 初期フェーズでは Git リポジトリのみを実装するが、将来の拡張を見据えた抽象化を採用
+- `sources` / `source_snapshots` テーブルにより、ソースタイプごとの差異を吸収

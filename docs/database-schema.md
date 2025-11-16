@@ -18,29 +18,49 @@
 
 ```mermaid
 erDiagram
-    repositories ||--o{ snapshots : "has"
-    snapshots ||--o{ files : "contains"
-    snapshots ||--o{ wiki_metadata : "has"
+    products ||--o{ sources : "has"
+    sources ||--o{ source_snapshots : "has"
+    sources ||--o{ git_refs : "has"
+    git_refs }o--|| source_snapshots : "points to"
+    source_snapshots ||--o{ files : "contains"
+    products ||--o{ wiki_metadata : "generates"
     files ||--o{ chunks : "split into"
     chunks ||--|| embeddings : "has"
 
-    repositories {
+    products {
         uuid id PK
         varchar name UK
-        text url
-        varchar default_branch
+        text description
         timestamp created_at
         timestamp updated_at
     }
 
-    snapshots {
+    sources {
         uuid id PK
-        uuid repository_id FK
-        varchar commit_hash
-        varchar ref_name
+        uuid product_id FK
+        varchar name UK
+        varchar source_type
+        jsonb metadata
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    source_snapshots {
+        uuid id PK
+        uuid source_id FK
+        text version_identifier
         boolean indexed
         timestamp indexed_at
         timestamp created_at
+    }
+
+    git_refs {
+        uuid id PK
+        uuid source_id FK
+        varchar ref_name
+        uuid snapshot_id FK
+        timestamp created_at
+        timestamp updated_at
     }
 
     files {
@@ -48,9 +68,8 @@ erDiagram
         uuid snapshot_id FK
         text path
         bigint size
-        varchar language
+        varchar content_type
         varchar content_hash
-        varchar source_type
         timestamp created_at
     }
 
@@ -75,8 +94,7 @@ erDiagram
 
     wiki_metadata {
         uuid id PK
-        uuid repository_id FK
-        uuid snapshot_id FK
+        uuid product_id FK
         text output_path
         integer file_count
         timestamp generated_at
@@ -88,98 +106,270 @@ erDiagram
 
 ## 2. テーブル定義
 
-### 2.1 repositories テーブル
+### 2.1 products テーブル
 
-リポジトリの基本情報を管理する。
+プロダクト（複数のソースをまとめる単位）の基本情報を管理する。
 
 ```sql
-CREATE TABLE repositories (
+CREATE TABLE products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL UNIQUE,
-    url TEXT NOT NULL,
-    default_branch VARCHAR(100) NOT NULL DEFAULT 'main',
+    description TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- インデックス
-CREATE INDEX idx_repositories_name ON repositories(name);
+CREATE INDEX idx_products_name ON products(name);
 
 -- コメント
-COMMENT ON TABLE repositories IS 'Gitリポジトリの基本情報';
-COMMENT ON COLUMN repositories.id IS 'リポジトリの一意識別子';
-COMMENT ON COLUMN repositories.name IS 'リポジトリ名（一意）';
-COMMENT ON COLUMN repositories.url IS 'GitリポジトリのURL（SSH/HTTPS）';
-COMMENT ON COLUMN repositories.default_branch IS 'デフォルトブランチ名';
+COMMENT ON TABLE products IS 'プロダクト（複数のソースをまとめる単位）';
+COMMENT ON COLUMN products.id IS 'プロダクトの一意識別子';
+COMMENT ON COLUMN products.name IS 'プロダクト名（一意）';
+COMMENT ON COLUMN products.description IS 'プロダクトの説明';
 ```
 
-### 2.2 snapshots テーブル
-
-リポジトリの特定コミット時点のスナップショットを管理する。
+**使用例:**
 
 ```sql
-CREATE TABLE snapshots (
+-- ECサイトプロダクト
+INSERT INTO products (name, description) VALUES (
+  'my-ecommerce',
+  'ECサイトプロダクト（フロントエンド、バックエンド、インフラ、ドキュメントを含む）'
+);
+
+-- 監視システムプロダクト
+INSERT INTO products (name, description) VALUES (
+  'monitoring-system',
+  '監視システム（Prometheus、Grafana、アラート設定を含む）'
+);
+```
+
+### 2.2 sources テーブル
+
+情報ソース（Git、Confluence、PDF等）の基本情報を管理する。
+
+```sql
+CREATE TABLE sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    commit_hash VARCHAR(40) NOT NULL,
-    ref_name VARCHAR(255),
-    indexed BOOLEAN NOT NULL DEFAULT FALSE,
-    indexed_at TIMESTAMP,
+    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('git', 'confluence', 'pdf', 'redmine', 'notion', 'local')),
+    metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_snapshots_repo_commit UNIQUE (repository_id, commit_hash)
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- インデックス
-CREATE INDEX idx_snapshots_repository_id ON snapshots(repository_id);
-CREATE INDEX idx_snapshots_commit_hash ON snapshots(commit_hash);
-CREATE INDEX idx_snapshots_ref_name ON snapshots(ref_name);
-CREATE INDEX idx_snapshots_indexed ON snapshots(indexed) WHERE indexed = TRUE;
+CREATE INDEX idx_sources_name ON sources(name);
+CREATE INDEX idx_sources_type ON sources(source_type);
+CREATE INDEX idx_sources_product_id ON sources(product_id);
 
 -- コメント
-COMMENT ON TABLE snapshots IS 'リポジトリの特定コミット時点のスナップショット';
-COMMENT ON COLUMN snapshots.id IS 'スナップショットの一意識別子';
-COMMENT ON COLUMN snapshots.repository_id IS '対象リポジトリのID';
-COMMENT ON COLUMN snapshots.commit_hash IS 'Gitコミットハッシュ（40文字のSHA-1）';
-COMMENT ON COLUMN snapshots.ref_name IS '参照名（ブランチ名またはタグ名）';
-COMMENT ON COLUMN snapshots.indexed IS 'インデックス完了フラグ';
-COMMENT ON COLUMN snapshots.indexed_at IS 'インデックス完了日時';
+COMMENT ON TABLE sources IS 'ドキュメント・コードのソース情報（Git、Confluence、PDFなど）';
+COMMENT ON COLUMN sources.id IS 'ソースの一意識別子';
+COMMENT ON COLUMN sources.product_id IS '所属するプロダクトのID（NULLの場合は未分類）';
+COMMENT ON COLUMN sources.name IS 'ソース名（一意）';
+COMMENT ON COLUMN sources.source_type IS 'ソースタイプ（git/confluence/pdf/redmine/notion/local）';
+COMMENT ON COLUMN sources.metadata IS 'ソースタイプ固有の情報（JSONBフォーマット）';
 ```
 
-### 2.3 files テーブル
+**metadata カラムの使用例:**
 
-スナップショット内のファイル情報を管理する。
+```sql
+-- Gitリポジトリの場合（プロダクトに属する）
+INSERT INTO sources (name, source_type, product_id, metadata) VALUES (
+  'my-ecommerce-backend',
+  'git',
+  'ecommerce-product-uuid',
+  '{"url": "git@github.com:example/backend.git", "default_branch": "main"}'::jsonb
+);
+
+-- Confluenceスペースの場合（プロダクトに属する）
+INSERT INTO sources (name, source_type, product_id, metadata) VALUES (
+  'my-ecommerce-docs',
+  'confluence',
+  'ecommerce-product-uuid',
+  '{"base_url": "https://confluence.example.com", "space_key": "ECOM", "username": "bot@example.com"}'::jsonb
+);
+
+-- 未分類のソース（product_id = NULL）
+INSERT INTO sources (name, source_type, metadata) VALUES (
+  'shared-library',
+  'git',
+  '{"url": "git@github.com:example/shared-lib.git", "default_branch": "main"}'::jsonb
+);
+```
+
+### 2.3 source_snapshots テーブル
+
+ソースの特定バージョン時点のスナップショットを管理する。
+
+```sql
+CREATE TABLE source_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    version_identifier TEXT NOT NULL,
+    indexed BOOLEAN NOT NULL DEFAULT FALSE,
+    indexed_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_source_snapshots_source_version UNIQUE (source_id, version_identifier)
+);
+
+-- インデックス
+CREATE INDEX idx_source_snapshots_source_id ON source_snapshots(source_id);
+CREATE INDEX idx_source_snapshots_version ON source_snapshots(version_identifier);
+CREATE INDEX idx_source_snapshots_indexed ON source_snapshots(indexed) WHERE indexed = TRUE;
+
+-- コメント
+COMMENT ON TABLE source_snapshots IS 'ソースの特定バージョン時点のスナップショット';
+COMMENT ON COLUMN source_snapshots.id IS 'スナップショットの一意識別子';
+COMMENT ON COLUMN source_snapshots.source_id IS '対象ソースのID';
+COMMENT ON COLUMN source_snapshots.version_identifier IS 'バージョン識別子（Gitの場合はcommit_hash、Confluenceの場合はpage_version等）';
+COMMENT ON COLUMN source_snapshots.indexed IS 'インデックス完了フラグ';
+COMMENT ON COLUMN source_snapshots.indexed_at IS 'インデックス完了日時';
+```
+
+**version_identifier の使い分け例:**
+
+| ソースタイプ | version_identifier の例 |
+|------------|------------------------|
+| git | `abc123def456...` (commit hash) |
+| confluence | `12` (page version number) |
+| pdf | `sha256:abc123...` (file hash) |
+| notion | `2024-01-15T10:30:00Z` (last edited timestamp) |
+```
+
+### 2.4 files テーブル
+
+スナップショット内のファイル・ドキュメント情報を管理する。
 
 ```sql
 CREATE TABLE files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    language VARCHAR(50),
+    content_type VARCHAR(100),
     content_hash VARCHAR(64) NOT NULL,
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('code', 'doc', 'wiki')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)
 );
 
 -- インデックス
 CREATE INDEX idx_files_snapshot_id ON files(snapshot_id);
-CREATE INDEX idx_files_source_type ON files(snapshot_id, source_type);
+CREATE INDEX idx_files_content_type ON files(content_type);
 CREATE INDEX idx_files_path ON files(path);
 CREATE INDEX idx_files_content_hash ON files(content_hash);
 
 -- コメント
-COMMENT ON TABLE files IS 'スナップショット内のファイル情報';
+COMMENT ON TABLE files IS 'スナップショット内のファイル・ドキュメント情報';
 COMMENT ON COLUMN files.id IS 'ファイルの一意識別子';
 COMMENT ON COLUMN files.snapshot_id IS '所属するスナップショットのID';
-COMMENT ON COLUMN files.path IS 'リポジトリルートからの相対パス';
+COMMENT ON COLUMN files.path IS 'ソースルートからの相対パス（またはドキュメント識別子）';
 COMMENT ON COLUMN files.size IS 'ファイルサイズ（バイト）';
-COMMENT ON COLUMN files.language IS 'プログラミング言語種別';
+COMMENT ON COLUMN files.content_type IS 'MIMEタイプ形式のコンテンツ種別（例: text/x-go, text/x-python, text/markdown, application/pdf, text/html）';
 COMMENT ON COLUMN files.content_hash IS 'ファイル内容のSHA-256ハッシュ';
-COMMENT ON COLUMN files.source_type IS 'ソース種別（code/doc/wiki）';
 ```
 
-### 2.4 chunks テーブル
+**カラムの使い分け例:**
+
+| ソースタイプ | path の例 | content_type の例 |
+|------------|----------|------------------|
+| git | `src/main.go`, `pkg/server/http.go` | `text/x-go` |
+| git | `README.md`, `docs/api.md` | `text/markdown` |
+| git | `src/index.js` | `text/javascript` |
+| confluence | `TEAM/Engineering/Architecture` | `text/html` |
+| pdf | `design-specs/system-architecture.pdf` | `application/pdf` |
+| notion | `Engineering/RFCs/RFC-001` | `text/markdown` |
+
+**主要なMIMEタイプ:**
+
+| 言語/形式 | content_type |
+|---------|--------------|
+| Go | `text/x-go` |
+| Python | `text/x-python` |
+| JavaScript | `text/javascript` |
+| TypeScript | `text/typescript` |
+| Java | `text/x-java` |
+| Markdown | `text/markdown` |
+| HTML | `text/html` |
+| JSON | `application/json` |
+| YAML | `application/x-yaml` |
+| PDF | `application/pdf` |
+```
+
+### 2.5 git_refs テーブル
+
+Git専用の参照（ブランチ、タグ）管理テーブル。
+
+```sql
+CREATE TABLE git_refs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    ref_name VARCHAR(255) NOT NULL,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_git_refs_source_ref UNIQUE (source_id, ref_name)
+);
+
+-- インデックス
+CREATE INDEX idx_git_refs_source_id ON git_refs(source_id);
+CREATE INDEX idx_git_refs_snapshot_id ON git_refs(snapshot_id);
+CREATE INDEX idx_git_refs_ref_name ON git_refs(ref_name);
+
+-- コメント
+COMMENT ON TABLE git_refs IS 'Git専用の参照（ブランチ、タグ）管理';
+COMMENT ON COLUMN git_refs.id IS 'Git参照の一意識別子';
+COMMENT ON COLUMN git_refs.source_id IS '対象ソースのID（source_type=gitのみ）';
+COMMENT ON COLUMN git_refs.ref_name IS '参照名（ブランチ名またはタグ名: main, develop, v1.0.0 等）';
+COMMENT ON COLUMN git_refs.snapshot_id IS '参照が指すスナップショットのID';
+COMMENT ON COLUMN git_refs.created_at IS '参照の作成日時';
+COMMENT ON COLUMN git_refs.updated_at IS '参照の更新日時（別のコミットを指すようになった時）';
+```
+
+**使用例:**
+
+```sql
+-- backend-api ソースの main ブランチを commit abc123 に設定
+INSERT INTO git_refs (source_id, ref_name, snapshot_id)
+VALUES (
+    'backend-api-uuid',
+    'main',
+    'snapshot-abc123-uuid'
+)
+ON CONFLICT (source_id, ref_name) DO UPDATE
+SET snapshot_id = EXCLUDED.snapshot_id,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- 同じコミットに v1.0.0 タグを追加
+INSERT INTO git_refs (source_id, ref_name, snapshot_id)
+VALUES (
+    'backend-api-uuid',
+    'v1.0.0',
+    'snapshot-abc123-uuid'  -- 同じスナップショットを指す
+)
+ON CONFLICT (source_id, ref_name) DO UPDATE
+SET snapshot_id = EXCLUDED.snapshot_id,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- backend-api ソースの main ブランチが指す最新スナップショットを取得
+SELECT ss.*
+FROM git_refs gr
+JOIN source_snapshots ss ON ss.id = gr.snapshot_id
+WHERE gr.source_id = 'backend-api-uuid'
+  AND gr.ref_name = 'main'
+  AND ss.indexed = TRUE;
+```
+
+**設計のポイント:**
+
+- `UNIQUE (source_id, ref_name)`: 1つのソースの1つのブランチ/タグは1つのスナップショットのみを指す
+- 同じコミット（スナップショット）を複数の参照（main と v1.0.0）で指すことが可能
+- Git以外のソースタイプ（Confluence、PDF等）にはこのテーブルを使用しない
+
+### 2.6 chunks テーブル
 
 ファイルを分割したチャンク情報を管理する。
 
@@ -215,7 +405,7 @@ COMMENT ON COLUMN chunks.content_hash IS 'チャンク内容のSHA-256ハッシ�
 COMMENT ON COLUMN chunks.token_count IS '推定トークン数';
 ```
 
-### 2.5 embeddings テーブル
+### 2.7 embeddings テーブル
 
 チャンクのEmbeddingベクトルを管理する。
 
@@ -248,35 +438,42 @@ COMMENT ON COLUMN embeddings.vector IS 'Embeddingベクトル（1536次元）';
 COMMENT ON COLUMN embeddings.model IS '使用したEmbeddingモデル名';
 ```
 
-### 2.6 wiki_metadata テーブル
+### 2.8 wiki_metadata テーブル
 
 Wiki生成の実行履歴とメタデータを管理する。
 
 ```sql
 CREATE TABLE wiki_metadata (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     output_path TEXT NOT NULL,
     file_count INTEGER NOT NULL DEFAULT 0,
     generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_wiki_metadata_snapshot UNIQUE (snapshot_id)
+    CONSTRAINT uq_wiki_metadata_product UNIQUE (product_id)
 );
 
 -- インデックス
-CREATE INDEX idx_wiki_metadata_repository_id ON wiki_metadata(repository_id);
-CREATE INDEX idx_wiki_metadata_snapshot_id ON wiki_metadata(snapshot_id);
+CREATE INDEX idx_wiki_metadata_product_id ON wiki_metadata(product_id);
 CREATE INDEX idx_wiki_metadata_generated_at ON wiki_metadata(generated_at DESC);
 
 -- コメント
-COMMENT ON TABLE wiki_metadata IS 'Wiki生成の実行履歴とメタデータ';
+COMMENT ON TABLE wiki_metadata IS 'Wiki生成の実行履歴とメタデータ（プロダクト単位のみ）';
 COMMENT ON COLUMN wiki_metadata.id IS 'Wiki生成レコードの一意識別子';
-COMMENT ON COLUMN wiki_metadata.repository_id IS '対象リポジトリのID';
-COMMENT ON COLUMN wiki_metadata.snapshot_id IS '対象スナップショットのID';
-COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パス（例: /var/lib/dev-rag/wikis/myapp/）';
+COMMENT ON COLUMN wiki_metadata.product_id IS '対象プロダクトのID';
+COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パス（例: /var/lib/dev-rag/wikis/my-ecommerce/）';
 COMMENT ON COLUMN wiki_metadata.file_count IS '生成されたWikiファイル数';
 COMMENT ON COLUMN wiki_metadata.generated_at IS 'Wiki生成完了日時';
+```
+
+**使用パターン:**
+
+**プロダクト単位でのWiki生成:**
+```sql
+INSERT INTO wiki_metadata (product_id, output_path, file_count) VALUES
+  ('my-ecommerce-uuid', '/var/lib/dev-rag/wikis/my-ecommerce/', 15);
+```
+プロダクトに紐付く全ソース（backend、frontend、Confluence等）の情報を統合したWikiを生成。
 ```
 
 ---
@@ -296,50 +493,76 @@ COMMENT ON COLUMN wiki_metadata.generated_at IS 'Wiki生成完了日時';
 -- pgvector拡張のインストール
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- repositoriesテーブル
-CREATE TABLE repositories (
+-- productsテーブル
+CREATE TABLE products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL UNIQUE,
-    url TEXT NOT NULL,
-    default_branch VARCHAR(100) NOT NULL DEFAULT 'main',
+    description TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_repositories_name ON repositories(name);
+CREATE INDEX idx_products_name ON products(name);
 
--- snapshotsテーブル
-CREATE TABLE snapshots (
+-- sourcesテーブル
+CREATE TABLE sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    commit_hash VARCHAR(40) NOT NULL,
-    ref_name VARCHAR(255),
+    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    source_type VARCHAR(50) NOT NULL CHECK (source_type IN ('git', 'confluence', 'pdf', 'redmine', 'notion', 'local')),
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_sources_name ON sources(name);
+CREATE INDEX idx_sources_type ON sources(source_type);
+CREATE INDEX idx_sources_product_id ON sources(product_id);
+
+-- source_snapshotsテーブル
+CREATE TABLE source_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    version_identifier TEXT NOT NULL,
     indexed BOOLEAN NOT NULL DEFAULT FALSE,
     indexed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_snapshots_repo_commit UNIQUE (repository_id, commit_hash)
+    CONSTRAINT uq_source_snapshots_source_version UNIQUE (source_id, version_identifier)
 );
 
-CREATE INDEX idx_snapshots_repository_id ON snapshots(repository_id);
-CREATE INDEX idx_snapshots_commit_hash ON snapshots(commit_hash);
-CREATE INDEX idx_snapshots_ref_name ON snapshots(ref_name);
-CREATE INDEX idx_snapshots_indexed ON snapshots(indexed) WHERE indexed = TRUE;
+CREATE INDEX idx_source_snapshots_source_id ON source_snapshots(source_id);
+CREATE INDEX idx_source_snapshots_version ON source_snapshots(version_identifier);
+CREATE INDEX idx_source_snapshots_indexed ON source_snapshots(indexed) WHERE indexed = TRUE;
+
+-- git_refsテーブル
+CREATE TABLE git_refs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    ref_name VARCHAR(255) NOT NULL,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_git_refs_source_ref UNIQUE (source_id, ref_name)
+);
+
+CREATE INDEX idx_git_refs_source_id ON git_refs(source_id);
+CREATE INDEX idx_git_refs_snapshot_id ON git_refs(snapshot_id);
+CREATE INDEX idx_git_refs_ref_name ON git_refs(ref_name);
 
 -- filesテーブル
 CREATE TABLE files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    language VARCHAR(50),
+    content_type VARCHAR(100),
     content_hash VARCHAR(64) NOT NULL,
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('code', 'doc', 'wiki')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)
 );
 
 CREATE INDEX idx_files_snapshot_id ON files(snapshot_id);
-CREATE INDEX idx_files_source_type ON files(snapshot_id, source_type);
+CREATE INDEX idx_files_content_type ON files(content_type);
 CREATE INDEX idx_files_path ON files(path);
 CREATE INDEX idx_files_content_hash ON files(content_hash);
 
@@ -377,17 +600,15 @@ WITH (lists = 100);
 -- wiki_metadataテーブル
 CREATE TABLE wiki_metadata (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     output_path TEXT NOT NULL,
     file_count INTEGER NOT NULL DEFAULT 0,
     generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_wiki_metadata_snapshot UNIQUE (snapshot_id)
+    CONSTRAINT uq_wiki_metadata_product UNIQUE (product_id)
 );
 
-CREATE INDEX idx_wiki_metadata_repository_id ON wiki_metadata(repository_id);
-CREATE INDEX idx_wiki_metadata_snapshot_id ON wiki_metadata(snapshot_id);
+CREATE INDEX idx_wiki_metadata_product_id ON wiki_metadata(product_id);
 CREATE INDEX idx_wiki_metadata_generated_at ON wiki_metadata(generated_at DESC);
 ```
 
@@ -398,8 +619,10 @@ DROP TABLE IF EXISTS wiki_metadata;
 DROP TABLE IF EXISTS embeddings;
 DROP TABLE IF EXISTS chunks;
 DROP TABLE IF EXISTS files;
-DROP TABLE IF EXISTS snapshots;
-DROP TABLE IF EXISTS repositories;
+DROP TABLE IF EXISTS git_refs;
+DROP TABLE IF EXISTS source_snapshots;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS products;
 DROP EXTENSION IF EXISTS vector;
 ```
 
@@ -409,31 +632,106 @@ DROP EXTENSION IF EXISTS vector;
 
 ### 4.1 基本的なCRUD操作
 
-#### リポジトリ登録
+#### プロダクト登録
 
 ```sql
-INSERT INTO repositories (name, url, default_branch)
-VALUES ('my-service', 'git@github.com:example/my-service.git', 'main')
+INSERT INTO products (name, description)
+VALUES (
+  'my-ecommerce',
+  'ECサイトプロダクト（フロントエンド、バックエンド、インフラ、ドキュメントを含む）'
+)
 RETURNING id, name, created_at;
 ```
 
-#### スナップショット作成
+#### ソース登録
 
 ```sql
-INSERT INTO snapshots (repository_id, commit_hash, ref_name)
-VALUES ('550e8400-e29b-41d4-a716-446655440000', 'abc123def456...', 'main')
-ON CONFLICT (repository_id, commit_hash) DO UPDATE
-SET ref_name = EXCLUDED.ref_name
+-- バックエンドGitリポジトリ
+INSERT INTO sources (name, source_type, metadata)
+VALUES (
+  'my-ecommerce-backend',
+  'git',
+  '{"url": "git@github.com:example/backend.git", "default_branch": "main"}'::jsonb
+)
+RETURNING id, name, created_at;
+
+-- フロントエンドGitリポジトリ
+INSERT INTO sources (name, source_type, metadata)
+VALUES (
+  'my-ecommerce-frontend',
+  'git',
+  '{"url": "git@github.com:example/frontend.git", "default_branch": "main"}'::jsonb
+)
+RETURNING id, name, created_at;
+
+-- Confluenceドキュメント
+INSERT INTO sources (name, source_type, metadata)
+VALUES (
+  'my-ecommerce-docs',
+  'confluence',
+  '{"base_url": "https://confluence.example.com", "space_key": "ECOM"}'::jsonb
+)
+RETURNING id, name, created_at;
+```
+
+#### プロダクトに属するソース一覧の取得
+
+```sql
+SELECT
+    s.id,
+    s.name,
+    s.source_type,
+    s.metadata
+FROM sources s
+WHERE s.product_id = $1  -- プロダクトID
+ORDER BY s.name;
+```
+
+#### スナップショット作成とGit参照の設定
+
+```sql
+-- 1. Gitリポジトリのスナップショット作成
+INSERT INTO source_snapshots (source_id, version_identifier)
+VALUES ('550e8400-e29b-41d4-a716-446655440000', 'abc123def456...')
+ON CONFLICT (source_id, version_identifier) DO NOTHING
+RETURNING id;
+
+-- 2. Git参照（main ブランチ）をスナップショットに紐付け
+INSERT INTO git_refs (source_id, ref_name, snapshot_id)
+VALUES (
+    '550e8400-e29b-41d4-a716-446655440000',
+    'main',
+    'snapshot-abc123-uuid'  -- 上記で取得したスナップショットID
+)
+ON CONFLICT (source_id, ref_name) DO UPDATE
+SET snapshot_id = EXCLUDED.snapshot_id,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- 3. 同じコミットに v1.0.0 タグを追加（同じスナップショットを指す）
+INSERT INTO git_refs (source_id, ref_name, snapshot_id)
+VALUES (
+    '550e8400-e29b-41d4-a716-446655440000',
+    'v1.0.0',
+    'snapshot-abc123-uuid'
+)
+ON CONFLICT (source_id, ref_name) DO UPDATE
+SET snapshot_id = EXCLUDED.snapshot_id,
+    updated_at = CURRENT_TIMESTAMP;
+
+-- Confluenceページのスナップショット（git_refsは使用しない）
+INSERT INTO source_snapshots (source_id, version_identifier)
+VALUES ('660e8400-e29b-41d4-a716-446655440000', '42')
+ON CONFLICT (source_id, version_identifier) DO NOTHING
 RETURNING id;
 ```
 
 #### ファイル登録
 
 ```sql
-INSERT INTO files (snapshot_id, path, size, language, content_hash, source_type)
+INSERT INTO files (snapshot_id, path, size, content_type, content_hash)
 VALUES
-    ('660e8400-e29b-41d4-a716-446655440000', 'src/main.go', 1024, 'go', 'hash123', 'code'),
-    ('660e8400-e29b-41d4-a716-446655440000', 'README.md', 512, 'markdown', 'hash456', 'doc')
+    ('660e8400-e29b-41d4-a716-446655440000', 'src/main.go', 1024, 'text/x-go', 'hash123'),
+    ('660e8400-e29b-41d4-a716-446655440000', 'README.md', 512, 'text/markdown', 'hash456')
 ON CONFLICT (snapshot_id, path) DO NOTHING;
 ```
 
@@ -452,17 +750,17 @@ VALUES ('880e8400-e29b-41d4-a716-446655440000', '[0.1, 0.2, ..., 0.9]', 'text-em
 
 ### 4.2 ベクトル検索クエリ
 
-#### 基本的なベクトル検索
+#### 基本的なベクトル検索（Git参照を使用）
 
 ```sql
 WITH target_snapshot AS (
-    SELECT s.id
-    FROM snapshots s
-    JOIN repositories r ON r.id = s.repository_id
-    WHERE r.name = 'my-service'
-      AND s.ref_name = 'main'
-      AND s.indexed = TRUE
-    ORDER BY s.created_at DESC
+    SELECT ss.id
+    FROM git_refs gr
+    JOIN source_snapshots ss ON ss.id = gr.snapshot_id
+    JOIN sources s ON s.id = gr.source_id
+    WHERE s.name = 'my-service'
+      AND gr.ref_name = 'main'
+      AND ss.indexed = TRUE
     LIMIT 1
 )
 SELECT
@@ -483,17 +781,19 @@ LIMIT 10;
 **パラメータ:**
 - `$1`: クエリのEmbeddingベクトル（VECTOR型）
 
-#### フィルタ付きベクトル検索
+**注:** Git以外のソース（Confluence、PDF等）の場合は、git_refsを使わずに最新のスナップショットを直接取得します。
+
+#### フィルタ付きベクトル検索（Git参照を使用）
 
 ```sql
 WITH target_snapshot AS (
-    SELECT s.id
-    FROM snapshots s
-    JOIN repositories r ON r.id = s.repository_id
-    WHERE r.name = $1  -- リポジトリ名
-      AND s.ref_name = $2  -- ブランチ名
-      AND s.indexed = TRUE
-    ORDER BY s.created_at DESC
+    SELECT ss.id
+    FROM git_refs gr
+    JOIN source_snapshots ss ON ss.id = gr.snapshot_id
+    JOIN sources s ON s.id = gr.source_id
+    WHERE s.name = $1  -- ソース名
+      AND gr.ref_name = $2  -- 参照名（ブランチ/タグ）
+      AND ss.indexed = TRUE
     LIMIT 1
 )
 SELECT
@@ -508,28 +808,28 @@ JOIN chunks c ON c.id = e.chunk_id
 JOIN files f ON f.id = c.file_id
 WHERE f.snapshot_id = (SELECT id FROM target_snapshot)
   AND ($4::text IS NULL OR f.path LIKE $4 || '%')  -- パスプレフィックス
-  AND ($5::text IS NULL OR f.source_type = $5)     -- ソース種別
+  AND ($5::text IS NULL OR f.content_type = $5)     -- コンテンツタイプ（MIMEタイプ）
 ORDER BY e.vector <=> $3::vector
 LIMIT $6;  -- 取得件数
 ```
 
 **パラメータ:**
-- `$1`: リポジトリ名
-- `$2`: 参照名（ブランチ/タグ）
+- `$1`: ソース名
+- `$2`: 参照名（Gitの場合はブランチ/タグ名: main, v1.0.0 等）
 - `$3`: クエリベクトル
 - `$4`: パスプレフィックス（オプション）
-- `$5`: ソース種別（オプション）
+- `$5`: コンテンツタイプ（オプション、MIMEタイプ: text/x-go, text/markdown 等）
 - `$6`: 取得件数
 
-#### 前後コンテキスト付き検索
+#### 前後コンテキスト付き検索（Git参照を使用）
 
 ```sql
 WITH target_snapshot AS (
-    SELECT s.id
-    FROM snapshots s
-    JOIN repositories r ON r.id = s.repository_id
-    WHERE r.name = $1 AND s.ref_name = $2 AND s.indexed = TRUE
-    ORDER BY s.created_at DESC
+    SELECT ss.id
+    FROM git_refs gr
+    JOIN source_snapshots ss ON ss.id = gr.snapshot_id
+    JOIN sources s ON s.id = gr.source_id
+    WHERE s.name = $1 AND gr.ref_name = $2 AND ss.indexed = TRUE
     LIMIT 1
 ),
 top_chunks AS (
@@ -615,74 +915,103 @@ DELETE FROM chunks WHERE file_id = $1;
 
 ### 4.4 Wiki生成関連クエリ
 
-#### Wiki生成メタデータ登録
+#### プロダクト単位でのWiki生成メタデータ登録
 
 ```sql
-INSERT INTO wiki_metadata (repository_id, snapshot_id, output_path, file_count, generated_at)
+INSERT INTO wiki_metadata (product_id, output_path, file_count, generated_at)
 VALUES (
-    $1,  -- repository_id
-    $2,  -- snapshot_id
-    $3,  -- output_path (例: /var/lib/dev-rag/wikis/myapp/)
-    $4,  -- file_count
+    $1,  -- product_id
+    $2,  -- output_path (例: /var/lib/dev-rag/wikis/my-ecommerce/)
+    $3,  -- file_count
     CURRENT_TIMESTAMP
 )
-ON CONFLICT (snapshot_id) DO UPDATE
+ON CONFLICT (product_id) DO UPDATE
 SET output_path = EXCLUDED.output_path,
     file_count = EXCLUDED.file_count,
     generated_at = CURRENT_TIMESTAMP
 RETURNING id, generated_at;
 ```
 
-#### 最新Wiki情報の取得
+
+#### プロダクト横断検索（複数ソースから検索）
+
+```sql
+-- プロダクトに属する全ソースのスナップショットから検索
+WITH target_snapshots AS (
+    SELECT DISTINCT ON (ss.source_id) ss.id
+    FROM source_snapshots ss
+    JOIN sources s ON s.id = ss.source_id
+    WHERE s.product_id = $1  -- プロダクトID
+      AND ss.indexed = TRUE
+    ORDER BY ss.source_id, ss.created_at DESC
+)
+SELECT
+    f.path,
+    c.start_line,
+    c.end_line,
+    c.content,
+    1 - (e.vector <=> $2::vector) AS score
+FROM embeddings e
+JOIN chunks c ON c.id = e.chunk_id
+JOIN files f ON f.id = c.file_id
+WHERE f.snapshot_id IN (SELECT id FROM target_snapshots)
+ORDER BY e.vector <=> $2::vector
+LIMIT $3;  -- 取得件数
+```
+
+#### プロダクトの最新Wiki情報取得
 
 ```sql
 SELECT
-    r.name AS repository_name,
-    s.commit_hash,
-    s.ref_name,
+    p.name AS product_name,
+    p.description,
     wm.output_path,
     wm.file_count,
-    wm.generated_at
+    wm.generated_at,
+    COUNT(s.id) AS source_count
 FROM wiki_metadata wm
-JOIN snapshots s ON s.id = wm.snapshot_id
-JOIN repositories r ON r.id = wm.repository_id
-WHERE r.name = $1  -- リポジトリ名
+JOIN products p ON p.id = wm.product_id
+LEFT JOIN sources s ON s.product_id = p.id
+WHERE p.name = $1  -- プロダクト名
+GROUP BY p.id, p.name, p.description, wm.id, wm.output_path, wm.file_count, wm.generated_at
 ORDER BY wm.generated_at DESC
 LIMIT 1;
 ```
 
-#### リポジトリごとのWiki生成履歴
+#### プロダクト一覧とWiki生成状況
 
 ```sql
 SELECT
-    r.name,
-    s.commit_hash,
-    s.ref_name,
+    p.id,
+    p.name,
+    p.description,
+    COUNT(s.id) AS source_count,
+    wm.output_path,
     wm.file_count,
     wm.generated_at
-FROM wiki_metadata wm
-JOIN snapshots s ON s.id = wm.snapshot_id
-JOIN repositories r ON r.id = wm.repository_id
-WHERE r.name = $1  -- リポジトリ名
-ORDER BY wm.generated_at DESC
-LIMIT 10;
+FROM products p
+LEFT JOIN sources s ON s.product_id = p.id
+LEFT JOIN wiki_metadata wm ON wm.product_id = p.id
+GROUP BY p.id, p.name, p.description, wm.id, wm.output_path, wm.file_count, wm.generated_at
+ORDER BY p.name;
 ```
 
 ### 4.5 統計・メタデータクエリ
 
-#### リポジトリごとのチャンク数
+#### ソースごとのチャンク数
 
 ```sql
 SELECT
-    r.name,
+    s.name,
+    s.source_type,
     COUNT(c.id) AS chunk_count,
     SUM(c.token_count) AS total_tokens
-FROM repositories r
-JOIN snapshots s ON s.repository_id = r.id
-JOIN files f ON f.snapshot_id = s.id
+FROM sources s
+JOIN source_snapshots ss ON ss.source_id = s.id
+JOIN files f ON f.snapshot_id = ss.id
 JOIN chunks c ON c.file_id = f.id
-WHERE s.indexed = TRUE
-GROUP BY r.id, r.name
+WHERE ss.indexed = TRUE
+GROUP BY s.id, s.name, s.source_type
 ORDER BY chunk_count DESC;
 ```
 
@@ -690,49 +1019,51 @@ ORDER BY chunk_count DESC;
 
 ```sql
 SELECT
-    r.name,
-    s.commit_hash,
-    s.ref_name,
-    s.indexed,
-    s.indexed_at,
+    s.name,
+    s.source_type,
+    ss.version_identifier,
+    ss.ref_name,
+    ss.indexed,
+    ss.indexed_at,
     COUNT(DISTINCT f.id) AS file_count,
     COUNT(c.id) AS chunk_count
-FROM repositories r
-JOIN snapshots s ON s.repository_id = r.id
-LEFT JOIN files f ON f.snapshot_id = s.id
+FROM sources s
+JOIN source_snapshots ss ON ss.source_id = s.id
+LEFT JOIN files f ON f.snapshot_id = ss.id
 LEFT JOIN chunks c ON c.file_id = f.id
-WHERE s.id IN (
-    SELECT DISTINCT ON (repository_id) id
-    FROM snapshots
+WHERE ss.id IN (
+    SELECT DISTINCT ON (source_id) id
+    FROM source_snapshots
     WHERE indexed = TRUE
-    ORDER BY repository_id, created_at DESC
+    ORDER BY source_id, created_at DESC
 )
-GROUP BY r.id, r.name, s.commit_hash, s.ref_name, s.indexed, s.indexed_at
-ORDER BY r.name;
+GROUP BY s.id, s.name, s.source_type, ss.version_identifier, ss.ref_name, ss.indexed, ss.indexed_at
+ORDER BY s.name;
 ```
 
 #### インデックス・Wiki統合情報
 
 ```sql
 SELECT
-    r.name,
-    s.commit_hash,
-    s.ref_name,
-    s.indexed,
-    s.indexed_at,
+    s.name,
+    s.source_type,
+    ss.version_identifier,
+    ss.ref_name,
+    ss.indexed,
+    ss.indexed_at,
     COUNT(DISTINCT f.id) AS file_count,
     COUNT(c.id) AS chunk_count,
     wm.output_path AS wiki_path,
     wm.file_count AS wiki_file_count,
     wm.generated_at AS wiki_generated_at
-FROM repositories r
-JOIN snapshots s ON s.repository_id = r.id
-LEFT JOIN files f ON f.snapshot_id = s.id
+FROM sources s
+JOIN source_snapshots ss ON ss.source_id = s.id
+LEFT JOIN files f ON f.snapshot_id = ss.id
 LEFT JOIN chunks c ON c.file_id = f.id
-LEFT JOIN wiki_metadata wm ON wm.snapshot_id = s.id
-WHERE r.name = $1  -- リポジトリ名
-  AND s.indexed = TRUE
-ORDER BY s.created_at DESC
+LEFT JOIN wiki_metadata wm ON wm.source_id = s.id
+WHERE s.name = $1  -- ソース名
+  AND ss.indexed = TRUE
+ORDER BY ss.created_at DESC
 LIMIT 1;
 ```
 

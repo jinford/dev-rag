@@ -1,75 +1,113 @@
 -- pgvector拡張のインストール
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- repositoriesテーブル
-CREATE TABLE IF NOT EXISTS repositories (
+-- productsテーブル
+CREATE TABLE IF NOT EXISTS products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL UNIQUE,
-    url TEXT NOT NULL,
-    default_branch VARCHAR(100) NOT NULL DEFAULT 'main',
+    description TEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_repositories_name ON repositories(name);
+CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 
-COMMENT ON TABLE repositories IS 'Gitリポジトリの基本情報';
-COMMENT ON COLUMN repositories.id IS 'リポジトリの一意識別子';
-COMMENT ON COLUMN repositories.name IS 'リポジトリ名（一意）';
-COMMENT ON COLUMN repositories.url IS 'GitリポジトリのURL（SSH/HTTPS）';
-COMMENT ON COLUMN repositories.default_branch IS 'デフォルトブランチ名';
+COMMENT ON TABLE products IS 'プロダクト（複数のソースをまとめる単位）';
+COMMENT ON COLUMN products.id IS 'プロダクトの一意識別子';
+COMMENT ON COLUMN products.name IS 'プロダクト名（一意）';
+COMMENT ON COLUMN products.description IS 'プロダクトの説明';
 
--- snapshotsテーブル
-CREATE TABLE IF NOT EXISTS snapshots (
+-- sourcesテーブル（repositoriesを抽象化）
+CREATE TABLE IF NOT EXISTS sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    commit_hash VARCHAR(40) NOT NULL,
-    ref_name VARCHAR(255),
+    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    source_type VARCHAR(50) NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_name ON sources(name);
+CREATE INDEX IF NOT EXISTS idx_sources_type ON sources(source_type);
+CREATE INDEX IF NOT EXISTS idx_sources_product_id ON sources(product_id);
+
+COMMENT ON TABLE sources IS 'ドキュメント・コードのソース情報（Git、Confluence、PDFなど）';
+COMMENT ON COLUMN sources.id IS 'ソースの一意識別子';
+COMMENT ON COLUMN sources.product_id IS '所属するプロダクトのID（NULLの場合は未分類）';
+COMMENT ON COLUMN sources.name IS 'ソース名（一意）';
+COMMENT ON COLUMN sources.source_type IS 'ソースタイプ（git/confluence/pdf/redmine/notion/local）';
+COMMENT ON COLUMN sources.metadata IS 'ソースタイプ固有の情報（JSONBフォーマット）。例: Gitの場合 {"url": "git@github.com:...", "default_branch": "main"}、Confluenceの場合 {"base_url": "https://...", "space_key": "..."}';
+
+-- source_snapshotsテーブル（snapshotsを抽象化）
+CREATE TABLE IF NOT EXISTS source_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    version_identifier TEXT NOT NULL,
     indexed BOOLEAN NOT NULL DEFAULT FALSE,
     indexed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_snapshots_repo_commit UNIQUE (repository_id, commit_hash)
+    CONSTRAINT uq_source_snapshots_source_version UNIQUE (source_id, version_identifier)
 );
 
-CREATE INDEX IF NOT EXISTS idx_snapshots_repository_id ON snapshots(repository_id);
-CREATE INDEX IF NOT EXISTS idx_snapshots_commit_hash ON snapshots(commit_hash);
-CREATE INDEX IF NOT EXISTS idx_snapshots_ref_name ON snapshots(ref_name);
-CREATE INDEX IF NOT EXISTS idx_snapshots_indexed ON snapshots(indexed) WHERE indexed = TRUE;
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_source_id ON source_snapshots(source_id);
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_version ON source_snapshots(version_identifier);
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_indexed ON source_snapshots(indexed) WHERE indexed = TRUE;
 
-COMMENT ON TABLE snapshots IS 'リポジトリの特定コミット時点のスナップショット';
-COMMENT ON COLUMN snapshots.id IS 'スナップショットの一意識別子';
-COMMENT ON COLUMN snapshots.repository_id IS '対象リポジトリのID';
-COMMENT ON COLUMN snapshots.commit_hash IS 'Gitコミットハッシュ（40文字のSHA-1）';
-COMMENT ON COLUMN snapshots.ref_name IS '参照名（ブランチ名またはタグ名）';
-COMMENT ON COLUMN snapshots.indexed IS 'インデックス完了フラグ';
-COMMENT ON COLUMN snapshots.indexed_at IS 'インデックス完了日時';
+COMMENT ON TABLE source_snapshots IS 'ソースの特定バージョン時点のスナップショット';
+COMMENT ON COLUMN source_snapshots.id IS 'スナップショットの一意識別子';
+COMMENT ON COLUMN source_snapshots.source_id IS '対象ソースのID';
+COMMENT ON COLUMN source_snapshots.version_identifier IS 'バージョン識別子（Gitの場合はcommit_hash、Confluenceの場合はpage_version、PDFの場合はfile_hash等）';
+COMMENT ON COLUMN source_snapshots.indexed IS 'インデックス完了フラグ';
+COMMENT ON COLUMN source_snapshots.indexed_at IS 'インデックス完了日時';
+
+-- git_refsテーブル（Git専用の参照管理）
+CREATE TABLE IF NOT EXISTS git_refs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id UUID NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    ref_name VARCHAR(255) NOT NULL,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_git_refs_source_ref UNIQUE (source_id, ref_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_git_refs_source_id ON git_refs(source_id);
+CREATE INDEX IF NOT EXISTS idx_git_refs_snapshot_id ON git_refs(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_git_refs_ref_name ON git_refs(ref_name);
+
+COMMENT ON TABLE git_refs IS 'Git専用の参照（ブランチ、タグ）管理';
+COMMENT ON COLUMN git_refs.id IS 'Git参照の一意識別子';
+COMMENT ON COLUMN git_refs.source_id IS '対象ソースのID（source_type=gitのみ）';
+COMMENT ON COLUMN git_refs.ref_name IS '参照名（ブランチ名またはタグ名: main, develop, v1.0.0 等）';
+COMMENT ON COLUMN git_refs.snapshot_id IS '参照が指すスナップショットのID';
+COMMENT ON COLUMN git_refs.created_at IS '参照の作成日時';
+COMMENT ON COLUMN git_refs.updated_at IS '参照の更新日時（別のコミットを指すようになった時）';
 
 -- filesテーブル
 CREATE TABLE IF NOT EXISTS files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    language VARCHAR(50),
+    content_type VARCHAR(100),
     content_hash VARCHAR(64) NOT NULL,
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('code', 'doc', 'wiki')),
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_snapshot_id ON files(snapshot_id);
-CREATE INDEX IF NOT EXISTS idx_files_source_type ON files(snapshot_id, source_type);
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+CREATE INDEX IF NOT EXISTS idx_files_content_type ON files(content_type);
 CREATE INDEX IF NOT EXISTS idx_files_content_hash ON files(content_hash);
 
-COMMENT ON TABLE files IS 'スナップショット内のファイル情報';
+COMMENT ON TABLE files IS 'スナップショット内のファイル・ドキュメント情報';
 COMMENT ON COLUMN files.id IS 'ファイルの一意識別子';
 COMMENT ON COLUMN files.snapshot_id IS '所属するスナップショットのID';
-COMMENT ON COLUMN files.path IS 'リポジトリルートからの相対パス';
+COMMENT ON COLUMN files.path IS 'ソースルートからの相対パス（またはドキュメント識別子）';
 COMMENT ON COLUMN files.size IS 'ファイルサイズ（バイト）';
-COMMENT ON COLUMN files.language IS 'プログラミング言語種別';
+COMMENT ON COLUMN files.content_type IS 'MIMEタイプ形式のコンテンツ種別（例: text/x-go, text/x-python, text/markdown, application/pdf, text/html）';
 COMMENT ON COLUMN files.content_hash IS 'ファイル内容のSHA-256ハッシュ';
-COMMENT ON COLUMN files.source_type IS 'ソース種別（code/doc/wiki）';
 
 -- chunksテーブル
 CREATE TABLE IF NOT EXISTS chunks (
@@ -119,26 +157,23 @@ COMMENT ON COLUMN embeddings.chunk_id IS 'チャンクID（主キー兼外部キ
 COMMENT ON COLUMN embeddings.vector IS 'Embeddingベクトル（1536次元）';
 COMMENT ON COLUMN embeddings.model IS '使用したEmbeddingモデル名';
 
--- wiki_metadataテーブル
+-- wiki_metadataテーブル（プロダクト単位のみ）
 CREATE TABLE IF NOT EXISTS wiki_metadata (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    repository_id UUID NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-    snapshot_id UUID NOT NULL REFERENCES snapshots(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     output_path TEXT NOT NULL,
     file_count INTEGER NOT NULL DEFAULT 0,
     generated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_wiki_metadata_snapshot UNIQUE (snapshot_id)
+    CONSTRAINT uq_wiki_metadata_product UNIQUE (product_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_wiki_metadata_repository_id ON wiki_metadata(repository_id);
-CREATE INDEX IF NOT EXISTS idx_wiki_metadata_snapshot_id ON wiki_metadata(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_wiki_metadata_product_id ON wiki_metadata(product_id);
 CREATE INDEX IF NOT EXISTS idx_wiki_metadata_generated_at ON wiki_metadata(generated_at DESC);
 
-COMMENT ON TABLE wiki_metadata IS 'Wiki生成の実行履歴とメタデータ';
+COMMENT ON TABLE wiki_metadata IS 'Wiki生成の実行履歴とメタデータ（プロダクト単位のみ）';
 COMMENT ON COLUMN wiki_metadata.id IS 'Wiki生成レコードの一意識別子';
-COMMENT ON COLUMN wiki_metadata.repository_id IS '対象リポジトリのID';
-COMMENT ON COLUMN wiki_metadata.snapshot_id IS '対象スナップショットのID';
-COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パス（例: /var/lib/dev-rag/wikis/myapp/）';
+COMMENT ON COLUMN wiki_metadata.product_id IS '対象プロダクトのID';
+COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パス（例: /var/lib/dev-rag/wikis/my-ecommerce/）';
 COMMENT ON COLUMN wiki_metadata.file_count IS '生成されたWikiファイル数';
 COMMENT ON COLUMN wiki_metadata.generated_at IS 'Wiki生成完了日時';
