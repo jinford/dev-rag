@@ -2,14 +2,14 @@ package models
 
 import "time"
 
-// Job はジョブの状況を表します
+// Job は非同期ジョブの状態を表します（フェーズ5: HTTPサーバで使用）
 type Job struct {
-	JobID      string     `json:"jobID"`
-	TargetType string     `json:"targetType"` // "product", "source"
-	TargetName string     `json:"targetName"`
-	JobType    string     `json:"jobType"` // "index", "wiki"
-	Status     string     `json:"status"`  // "running", "completed", "failed"
-	StartedAt  time.Time  `json:"startedAt"`
-	EndedAt    *time.Time `json:"endedAt,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	ID         string    `json:"id"`
+	TargetType string    `json:"targetType"` // "product" or "source"
+	TargetName string    `json:"targetName"`
+	JobType    string    `json:"jobType"` // "index" or "wiki"
+	Status     string    `json:"status"`  // "running", "completed", "failed"
+	ErrorMsg   *string   `json:"errorMsg,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }

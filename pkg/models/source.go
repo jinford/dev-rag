@@ -8,6 +8,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// === Source集約: Source（ルート）+ SourceSnapshot + GitRef ===
+
 // Source は情報ソース（Git、Confluence、PDF等）の基本情報を表します
 type Source struct {
 	ID         uuid.UUID      `json:"id"`
@@ -64,15 +66,4 @@ type GitRef struct {
 	SnapshotID uuid.UUID `json:"snapshotID"`
 	CreatedAt  time.Time `json:"createdAt"`
 	UpdatedAt  time.Time `json:"updatedAt"`
-}
-
-// File はスナップショット内のファイル情報を表します
-type File struct {
-	ID          uuid.UUID `json:"id"`
-	SnapshotID  uuid.UUID `json:"snapshotID"`
-	Path        string    `json:"path"`
-	Size        int64     `json:"size"`
-	ContentType *string   `json:"contentType,omitempty"`
-	ContentHash string    `json:"contentHash"`
-	CreatedAt   time.Time `json:"createdAt"`
 }
