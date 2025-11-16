@@ -250,7 +250,7 @@ CREATE TABLE files (
     snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    content_type VARCHAR(100),
+    content_type VARCHAR(100) NOT NULL,
     content_hash VARCHAR(64) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)
@@ -555,7 +555,7 @@ CREATE TABLE files (
     snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    content_type VARCHAR(100),
+    content_type VARCHAR(100) NOT NULL,
     content_hash VARCHAR(64) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)

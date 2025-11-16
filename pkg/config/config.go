@@ -60,6 +60,7 @@ type GitConfig struct {
 	CloneDir      string
 	SSHKeyPath    string
 	SSHKnownHosts string
+	DefaultBranch string // デフォルトブランチ名（例: main, master）
 }
 
 // Load は環境変数または.envファイルから設定を読み込みます
@@ -100,6 +101,7 @@ func Load(envFilePath string) (*Config, error) {
 			CloneDir:      getEnv("GIT_CLONE_DIR", "/var/lib/dev-rag/repos"),
 			SSHKeyPath:    getEnv("GIT_SSH_KEY_PATH", "/etc/dev-rag/ssh/id_rsa"),
 			SSHKnownHosts: getEnv("GIT_SSH_KNOWN_HOSTS", "/etc/dev-rag/ssh/known_hosts"),
+			DefaultBranch: getEnv("GIT_DEFAULT_BRANCH", "main"),
 		},
 		WikiOutputDir: getEnv("WIKI_OUTPUT_DIR", "/var/lib/dev-rag/wikis"),
 	}

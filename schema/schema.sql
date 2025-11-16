@@ -20,7 +20,7 @@ COMMENT ON COLUMN products.description IS 'プロダクトの説明';
 -- sourcesテーブル（repositoriesを抽象化）
 CREATE TABLE IF NOT EXISTS sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_id UUID REFERENCES products(id) ON DELETE SET NULL,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL UNIQUE,
     source_type VARCHAR(50) NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}',
@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_sources_product_id ON sources(product_id);
 
 COMMENT ON TABLE sources IS 'ドキュメント・コードのソース情報（Git、Confluence、PDFなど）';
 COMMENT ON COLUMN sources.id IS 'ソースの一意識別子';
-COMMENT ON COLUMN sources.product_id IS '所属するプロダクトのID（NULLの場合は未分類）';
+COMMENT ON COLUMN sources.product_id IS '所属するプロダクトのID（必須）';
 COMMENT ON COLUMN sources.name IS 'ソース名（一意）';
 COMMENT ON COLUMN sources.source_type IS 'ソースタイプ（git/confluence/pdf/redmine/notion/local）';
 COMMENT ON COLUMN sources.metadata IS 'ソースタイプ固有の情報（JSONBフォーマット）。例: Gitの場合 {"url": "git@github.com:...", "default_branch": "main"}、Confluenceの場合 {"base_url": "https://...", "space_key": "..."}';
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS files (
     snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
     path TEXT NOT NULL,
     size BIGINT NOT NULL,
-    content_type VARCHAR(100),
+    content_type VARCHAR(100) NOT NULL,
     content_hash VARCHAR(64) NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_files_snapshot_path UNIQUE (snapshot_id, path)

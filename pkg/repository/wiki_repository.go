@@ -3,70 +3,62 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jinford/dev-rag/pkg/models"
+	"github.com/jinford/dev-rag/pkg/sqlc"
 )
 
-// WikiRepository はWikiメタデータのデータベース操作を提供します
+// WikiRepositoryR はWikiメタデータの読み取り専用データベース操作を提供します
 // 集約: WikiMetadata（プロダクトに関連するが独立したライフサイクル）
-type WikiRepository struct {
-	pool *pgxpool.Pool
+type WikiRepositoryR struct {
+	q sqlc.Querier
 }
 
-// NewWikiRepository は新しいWikiRepositoryを作成します
-func NewWikiRepository(pool *pgxpool.Pool) *WikiRepository {
-	return &WikiRepository{pool: pool}
+// NewWikiRepositoryR は新しい読み取り専用リポジトリを作成します
+func NewWikiRepositoryR(q sqlc.Querier) *WikiRepositoryR {
+	return &WikiRepositoryR{q: q}
+}
+
+// WikiRepositoryRW は WikiRepositoryR を埋め込み、書き込み操作を提供します
+type WikiRepositoryRW struct {
+	*WikiRepositoryR
+}
+
+// NewWikiRepositoryRW は読み書き可能なリポジトリを作成します
+func NewWikiRepositoryRW(q sqlc.Querier) *WikiRepositoryRW {
+	return &WikiRepositoryRW{WikiRepositoryR: NewWikiRepositoryR(q)}
 }
 
 // UpsertMetadata はWikiメタデータを登録・更新します
-func (r *WikiRepository) UpsertMetadata(ctx context.Context, productID uuid.UUID, outputPath string, fileCount int) (*models.WikiMetadata, error) {
-	query := `
-		INSERT INTO wiki_metadata (product_id, output_path, file_count, generated_at)
-		VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-		ON CONFLICT (product_id)
-		DO UPDATE SET
-			output_path = EXCLUDED.output_path,
-			file_count = EXCLUDED.file_count,
-			generated_at = CURRENT_TIMESTAMP
-		RETURNING id, product_id, output_path, file_count, generated_at, created_at
-	`
-
-	var metadata models.WikiMetadata
-	err := r.pool.QueryRow(ctx, query, productID, outputPath, fileCount).Scan(
-		&metadata.ID,
-		&metadata.ProductID,
-		&metadata.OutputPath,
-		&metadata.FileCount,
-		&metadata.GeneratedAt,
-		&metadata.CreatedAt,
-	)
+func (rw *WikiRepositoryRW) UpsertMetadata(ctx context.Context, productID uuid.UUID, outputPath string, fileCount int) (*models.WikiMetadata, error) {
+	sqlcMetadata, err := rw.q.CreateWikiMetadata(ctx, sqlc.CreateWikiMetadataParams{
+		ProductID:   UUIDToPgtype(productID),
+		OutputPath:  outputPath,
+		FileCount:   int32(fileCount),
+		GeneratedAt: TimestampToPgtype(time.Now()),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to upsert wiki metadata: %w", err)
 	}
 
-	return &metadata, nil
+	metadata := &models.WikiMetadata{
+		ID:          PgtypeToUUID(sqlcMetadata.ID),
+		ProductID:   PgtypeToUUID(sqlcMetadata.ProductID),
+		OutputPath:  sqlcMetadata.OutputPath,
+		FileCount:   int(sqlcMetadata.FileCount),
+		GeneratedAt: PgtypeToTime(sqlcMetadata.GeneratedAt),
+		CreatedAt:   PgtypeToTime(sqlcMetadata.CreatedAt),
+	}
+
+	return metadata, nil
 }
 
 // GetByProductID はプロダクトIDでWikiメタデータを取得します
-func (r *WikiRepository) GetByProductID(ctx context.Context, productID uuid.UUID) (*models.WikiMetadata, error) {
-	query := `
-		SELECT id, product_id, output_path, file_count, generated_at, created_at
-		FROM wiki_metadata
-		WHERE product_id = $1
-	`
-
-	var metadata models.WikiMetadata
-	err := r.pool.QueryRow(ctx, query, productID).Scan(
-		&metadata.ID,
-		&metadata.ProductID,
-		&metadata.OutputPath,
-		&metadata.FileCount,
-		&metadata.GeneratedAt,
-		&metadata.CreatedAt,
-	)
+func (r *WikiRepositoryR) GetByProductID(ctx context.Context, productID uuid.UUID) (*models.WikiMetadata, error) {
+	sqlcMetadata, err := r.q.GetWikiMetadataByProduct(ctx, UUIDToPgtype(productID))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("wiki metadata not found for product: %s", productID)
@@ -74,20 +66,33 @@ func (r *WikiRepository) GetByProductID(ctx context.Context, productID uuid.UUID
 		return nil, fmt.Errorf("failed to get wiki metadata: %w", err)
 	}
 
-	return &metadata, nil
-}
-
-// Delete はWikiメタデータを削除します
-func (r *WikiRepository) Delete(ctx context.Context, productID uuid.UUID) error {
-	query := `DELETE FROM wiki_metadata WHERE product_id = $1`
-
-	result, err := r.pool.Exec(ctx, query, productID)
-	if err != nil {
-		return fmt.Errorf("failed to delete wiki metadata: %w", err)
+	metadata := &models.WikiMetadata{
+		ID:          PgtypeToUUID(sqlcMetadata.ID),
+		ProductID:   PgtypeToUUID(sqlcMetadata.ProductID),
+		OutputPath:  sqlcMetadata.OutputPath,
+		FileCount:   int(sqlcMetadata.FileCount),
+		GeneratedAt: PgtypeToTime(sqlcMetadata.GeneratedAt),
+		CreatedAt:   PgtypeToTime(sqlcMetadata.CreatedAt),
 	}
 
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("wiki metadata not found for product: %s", productID)
+	return metadata, nil
+}
+
+// Delete はWikiメタデータを削除します（プロダクトIDで削除）
+func (rw *WikiRepositoryRW) Delete(ctx context.Context, productID uuid.UUID) error {
+	// まず取得してIDを確認
+	metadata, err := rw.q.GetWikiMetadataByProduct(ctx, UUIDToPgtype(productID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("wiki metadata not found for product: %s", productID)
+		}
+		return fmt.Errorf("failed to get wiki metadata: %w", err)
+	}
+
+	// IDで削除
+	err = rw.q.DeleteWikiMetadata(ctx, metadata.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete wiki metadata: %w", err)
 	}
 
 	return nil

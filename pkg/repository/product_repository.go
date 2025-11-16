@@ -7,55 +7,59 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/jinford/dev-rag/pkg/models"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jinford/dev-rag/pkg/sqlc"
 )
 
-// ProductRepository はプロダクト集約のデータベース操作を提供します
+// ProductRepositoryR はプロダクト集約の読み取り専用リポジトリです
 // 集約: Product（ルートのみ）
-type ProductRepository struct {
-	pool *pgxpool.Pool
+type ProductRepositoryR struct {
+	q sqlc.Querier
 }
 
-// NewProductRepository は新しいProductRepositoryを作成します
-func NewProductRepository(pool *pgxpool.Pool) *ProductRepository {
-	return &ProductRepository{pool: pool}
+// NewProductRepositoryR は新しい読み取り専用リポジトリを作成します
+func NewProductRepositoryR(q sqlc.Querier) *ProductRepositoryR {
+	return &ProductRepositoryR{q: q}
+}
+
+// ProductRepositoryRW は ProductRepositoryR を埋め込み書き込み操作を提供します
+type ProductRepositoryRW struct {
+	*ProductRepositoryR
+}
+
+// NewProductRepositoryRW は読み書き可能なリポジトリを作成します
+func NewProductRepositoryRW(q sqlc.Querier) *ProductRepositoryRW {
+	return &ProductRepositoryRW{ProductRepositoryR: NewProductRepositoryR(q)}
 }
 
 // ProductWithStats はプロダクトと統計情報を含む構造体です
 type ProductWithStats struct {
-	models.Product
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	Description     *string    `json:"description,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 	SourceCount     int        `json:"sourceCount"`
 	LastIndexedAt   *time.Time `json:"lastIndexedAt,omitempty"`
 	WikiGeneratedAt *time.Time `json:"wikiGeneratedAt,omitempty"`
 }
 
 // CreateIfNotExists は名前でプロダクトを検索し、存在しなければ作成します（冪等）
-func (r *ProductRepository) CreateIfNotExists(ctx context.Context, name string, description *string) (*models.Product, error) {
+func (rw *ProductRepositoryRW) CreateIfNotExists(ctx context.Context, name string, description *string) (*sqlc.Product, error) {
 	// まず既存のプロダクトを検索
-	existing, err := r.GetByName(ctx, name)
+	existing, err := rw.q.GetProductByName(ctx, name)
 	if err == nil {
-		return existing, nil
+		return &existing, nil
+	}
+	if err != pgx.ErrNoRows {
+		return nil, fmt.Errorf("failed to check existing product: %w", err)
 	}
 
 	// 存在しない場合は作成
-	query := `
-		INSERT INTO products (name, description)
-		VALUES ($1, $2)
-		ON CONFLICT (name) DO UPDATE SET
-			description = COALESCE(EXCLUDED.description, products.description),
-			updated_at = CURRENT_TIMESTAMP
-		RETURNING id, name, description, created_at, updated_at
-	`
-
-	var product models.Product
-	err = r.pool.QueryRow(ctx, query, name, description).Scan(
-		&product.ID,
-		&product.Name,
-		&product.Description,
-		&product.CreatedAt,
-		&product.UpdatedAt,
-	)
+	product, err := rw.q.CreateProduct(ctx, sqlc.CreateProductParams{
+		Name:        name,
+		Description: StringPtrToPgtext(description),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create product: %w", err)
 	}
@@ -64,22 +68,12 @@ func (r *ProductRepository) CreateIfNotExists(ctx context.Context, name string, 
 }
 
 // Update はプロダクト情報を更新します
-func (r *ProductRepository) Update(ctx context.Context, id uuid.UUID, name string, description *string) (*models.Product, error) {
-	query := `
-		UPDATE products
-		SET name = $2, description = $3, updated_at = CURRENT_TIMESTAMP
-		WHERE id = $1
-		RETURNING id, name, description, created_at, updated_at
-	`
-
-	var product models.Product
-	err := r.pool.QueryRow(ctx, query, id, name, description).Scan(
-		&product.ID,
-		&product.Name,
-		&product.Description,
-		&product.CreatedAt,
-		&product.UpdatedAt,
-	)
+func (rw *ProductRepositoryRW) Update(ctx context.Context, id uuid.UUID, name string, description *string) (*sqlc.Product, error) {
+	product, err := rw.q.UpdateProduct(ctx, sqlc.UpdateProductParams{
+		ID:          UUIDToPgtype(id),
+		Name:        name,
+		Description: StringPtrToPgtext(description),
+	})
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("product not found: %s", id)
@@ -91,21 +85,8 @@ func (r *ProductRepository) Update(ctx context.Context, id uuid.UUID, name strin
 }
 
 // GetByID はIDでプロダクトを取得します
-func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error) {
-	query := `
-		SELECT id, name, description, created_at, updated_at
-		FROM products
-		WHERE id = $1
-	`
-
-	var product models.Product
-	err := r.pool.QueryRow(ctx, query, id).Scan(
-		&product.ID,
-		&product.Name,
-		&product.Description,
-		&product.CreatedAt,
-		&product.UpdatedAt,
-	)
+func (r *ProductRepositoryR) GetByID(ctx context.Context, id uuid.UUID) (*sqlc.Product, error) {
+	product, err := r.q.GetProduct(ctx, UUIDToPgtype(id))
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("product not found: %s", id)
@@ -117,21 +98,8 @@ func (r *ProductRepository) GetByID(ctx context.Context, id uuid.UUID) (*models.
 }
 
 // GetByName は名前でプロダクトを取得します
-func (r *ProductRepository) GetByName(ctx context.Context, name string) (*models.Product, error) {
-	query := `
-		SELECT id, name, description, created_at, updated_at
-		FROM products
-		WHERE name = $1
-	`
-
-	var product models.Product
-	err := r.pool.QueryRow(ctx, query, name).Scan(
-		&product.ID,
-		&product.Name,
-		&product.Description,
-		&product.CreatedAt,
-		&product.UpdatedAt,
-	)
+func (r *ProductRepositoryR) GetByName(ctx context.Context, name string) (*sqlc.Product, error) {
+	product, err := r.q.GetProductByName(ctx, name)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, fmt.Errorf("product not found: %s", name)
@@ -143,103 +111,52 @@ func (r *ProductRepository) GetByName(ctx context.Context, name string) (*models
 }
 
 // List はすべてのプロダクトを取得します
-func (r *ProductRepository) List(ctx context.Context) ([]*models.Product, error) {
-	query := `
-		SELECT id, name, description, created_at, updated_at
-		FROM products
-		ORDER BY name
-	`
-
-	rows, err := r.pool.Query(ctx, query)
+func (r *ProductRepositoryR) List(ctx context.Context) ([]sqlc.Product, error) {
+	products, err := r.q.ListProducts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list products: %w", err)
-	}
-	defer rows.Close()
-
-	var products []*models.Product
-	for rows.Next() {
-		var product models.Product
-		if err := rows.Scan(
-			&product.ID,
-			&product.Name,
-			&product.Description,
-			&product.CreatedAt,
-			&product.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan product: %w", err)
-		}
-		products = append(products, &product)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating products: %w", err)
 	}
 
 	return products, nil
 }
 
 // GetListWithStats は統計情報付きのプロダクト一覧を取得します
-func (r *ProductRepository) GetListWithStats(ctx context.Context) ([]*ProductWithStats, error) {
-	query := `
-		SELECT
-			p.id,
-			p.name,
-			p.description,
-			p.created_at,
-			p.updated_at,
-			COUNT(DISTINCT s.id) AS source_count,
-			MAX(ss.indexed_at) AS last_indexed_at,
-			MAX(wm.generated_at) AS wiki_generated_at
-		FROM products p
-		LEFT JOIN sources s ON p.id = s.product_id
-		LEFT JOIN source_snapshots ss ON s.id = ss.source_id AND ss.indexed = TRUE
-		LEFT JOIN wiki_metadata wm ON p.id = wm.product_id
-		GROUP BY p.id, p.name, p.description, p.created_at, p.updated_at
-		ORDER BY p.name
-	`
-
-	rows, err := r.pool.Query(ctx, query)
+func (r *ProductRepositoryR) GetListWithStats(ctx context.Context) ([]*ProductWithStats, error) {
+	rows, err := r.q.ListProductsWithStats(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list products with stats: %w", err)
 	}
-	defer rows.Close()
 
-	var products []*ProductWithStats
-	for rows.Next() {
-		var product ProductWithStats
-		if err := rows.Scan(
-			&product.ID,
-			&product.Name,
-			&product.Description,
-			&product.CreatedAt,
-			&product.UpdatedAt,
-			&product.SourceCount,
-			&product.LastIndexedAt,
-			&product.WikiGeneratedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan product with stats: %w", err)
+	products := make([]*ProductWithStats, 0, len(rows))
+	for _, row := range rows {
+		product := &ProductWithStats{
+			ID:          PgtypeToUUID(row.ID),
+			Name:        row.Name,
+			Description: PgtextToStringPtr(row.Description),
+			CreatedAt:   PgtypeToTime(row.CreatedAt),
+			UpdatedAt:   PgtypeToTime(row.UpdatedAt),
+			SourceCount: int(row.SourceCount),
 		}
-		products = append(products, &product)
-	}
 
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating products with stats: %w", err)
+		// NULL可能なフィールドを処理
+		if lastIndexed, ok := row.LastIndexedAt.(pgtype.Timestamp); ok {
+			product.LastIndexedAt = PgtypeToTimePtr(lastIndexed)
+		}
+		if wikiGenerated, ok := row.WikiGeneratedAt.(pgtype.Timestamp); ok {
+			product.WikiGeneratedAt = PgtypeToTimePtr(wikiGenerated)
+		}
+
+		products = append(products, product)
 	}
 
 	return products, nil
 }
 
 // Delete はプロダクトを削除します（内部API専用）
-func (r *ProductRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	query := `DELETE FROM products WHERE id = $1`
-
-	result, err := r.pool.Exec(ctx, query, id)
+func (rw *ProductRepositoryRW) Delete(ctx context.Context, id uuid.UUID) error {
+	err := rw.q.DeleteProduct(ctx, UUIDToPgtype(id))
 	if err != nil {
 		return fmt.Errorf("failed to delete product: %w", err)
-	}
-
-	if result.RowsAffected() == 0 {
-		return fmt.Errorf("product not found: %s", id)
 	}
 
 	return nil

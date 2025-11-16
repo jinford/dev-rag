@@ -14,7 +14,7 @@ type File struct {
 	SnapshotID  uuid.UUID `json:"snapshotID"`
 	Path        string    `json:"path"`
 	Size        int64     `json:"size"`
-	ContentType *string   `json:"contentType,omitempty"`
+	ContentType string    `json:"contentType"`
 	ContentHash string    `json:"contentHash"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
@@ -28,7 +28,7 @@ type Chunk struct {
 	EndLine     int       `json:"endLine"`
 	Content     string    `json:"content"`
 	ContentHash string    `json:"contentHash"`
-	TokenCount  *int      `json:"tokenCount,omitempty"`
+	TokenCount  int       `json:"tokenCount"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 

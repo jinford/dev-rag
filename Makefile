@@ -1,4 +1,4 @@
-.PHONY: help build clean test run-product run-source run-index run-wiki run-server install dev-setup db-up db-down db-reset
+.PHONY: help build clean test run-product run-source run-index run-wiki run-server install dev-setup db-up db-down db-reset sqlc-generate
 
 # デフォルトターゲット
 help:
@@ -12,6 +12,7 @@ help:
 	@echo "  make db-up        - データベースを起動"
 	@echo "  make db-down      - データベースを停止"
 	@echo "  make db-reset     - データベースをリセット"
+	@echo "  make sqlc-generate - SQLクエリからGoコードを生成"
 	@echo ""
 	@echo "  make run-product  - プロダクト管理コマンドを実行"
 	@echo "  make run-source   - ソース管理コマンドを実行"
@@ -163,6 +164,12 @@ fmt:
 	@echo "コードをフォーマット中..."
 	@go fmt ./...
 	@echo "✓ フォーマット完了"
+
+# sqlcでコード生成
+sqlc-generate:
+	@echo "SQLクエリからGoコードを生成中..."
+	@go tool sqlc generate
+	@echo "✓ コード生成完了: pkg/sqlc/"
 
 # ビルド + テスト
 all: build test

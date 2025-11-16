@@ -13,7 +13,7 @@ import (
 // Source は情報ソース（Git、Confluence、PDF等）の基本情報を表します
 type Source struct {
 	ID         uuid.UUID      `json:"id"`
-	ProductID  *uuid.UUID     `json:"productID,omitempty"`
+	ProductID  uuid.UUID      `json:"productID"`
 	Name       string         `json:"name"`
 	SourceType SourceType     `json:"sourceType"`
 	Metadata   SourceMetadata `json:"metadata"`
