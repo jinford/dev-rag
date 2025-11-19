@@ -318,12 +318,13 @@ func (c *GitClient) CloneOrPull(ctx context.Context, url, destDir, ref string) e
 	// リポジトリディレクトリが存在するか確認
 	gitDir := filepath.Join(destDir, ".git")
 	if _, err := os.Stat(gitDir); os.IsNotExist(err) {
-		// 存在しない場合はクローン
+		// 存在しない場合はクローン（新規クローン時はPullをスキップ）
 		if err := c.Clone(ctx, url, destDir); err != nil {
 			return err
 		}
+		return nil
 	}
 
-	// pullを実行
+	// 既存リポジトリの場合はpullを実行
 	return c.Pull(ctx, destDir, ref)
 }
