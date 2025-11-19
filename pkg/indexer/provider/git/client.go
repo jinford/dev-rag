@@ -19,12 +19,15 @@ import (
 type GitClient struct {
 	// SSH認証用の秘密鍵パス
 	sshKeyPath string
+	// SSH秘密鍵のパスワード（パスフレーズ）
+	sshPassword string
 }
 
 // NewGitClient は新しいGitClientを作成します
-func NewGitClient(sshKeyPath string) *GitClient {
+func NewGitClient(sshKeyPath, sshPassword string) *GitClient {
 	return &GitClient{
-		sshKeyPath: sshKeyPath,
+		sshKeyPath:  sshKeyPath,
+		sshPassword: sshPassword,
 	}
 }
 
@@ -262,7 +265,7 @@ func (c *GitClient) getSSHAuth() (*ssh.PublicKeys, error) {
 	}
 
 	// SSH鍵を読み込み
-	auth, err := ssh.NewPublicKeysFromFile("git", c.sshKeyPath, "")
+	auth, err := ssh.NewPublicKeysFromFile("git", c.sshKeyPath, c.sshPassword)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load SSH key: %w", err)
 	}

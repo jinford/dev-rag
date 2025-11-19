@@ -59,6 +59,7 @@ type WikiLLMConfig struct {
 type GitConfig struct {
 	CloneDir      string
 	SSHKeyPath    string
+	SSHPassword   string // SSH秘密鍵のパスワード（パスフレーズ）
 	SSHKnownHosts string
 	DefaultBranch string // デフォルトブランチ名（例: main, master）
 }
@@ -100,6 +101,7 @@ func Load(envFilePath string) (*Config, error) {
 		Git: GitConfig{
 			CloneDir:      getEnv("GIT_CLONE_DIR", "/var/lib/dev-rag/repos"),
 			SSHKeyPath:    getEnv("GIT_SSH_KEY_PATH", "/etc/dev-rag/ssh/id_rsa"),
+			SSHPassword:   getEnv("GIT_SSH_PASSWORD", ""),
 			SSHKnownHosts: getEnv("GIT_SSH_KNOWN_HOSTS", "/etc/dev-rag/ssh/known_hosts"),
 			DefaultBranch: getEnv("GIT_DEFAULT_BRANCH", "main"),
 		},
