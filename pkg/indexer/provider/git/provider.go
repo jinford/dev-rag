@@ -16,7 +16,6 @@ type Provider struct {
 	gitClient       *GitClient
 	gitCloneBaseDir string
 	defaultBranch   string
-	sourceID        string // クローン先のディレクトリパス生成用
 	ignoreFilter    *filter.IgnoreFilter
 }
 
@@ -36,33 +35,15 @@ func (p *Provider) GetSourceType() models.SourceType {
 
 // ExtractSourceName はGit URLからソース名を抽出します
 // 例: git@github.com:user/repo.git -> github.com/user/repo
-// 例: https://github.com/user/repo.git -> github.com/user/repo
+// 例: https://github.com:8080/user/repo.git -> github.com/user/repo
 func (p *Provider) ExtractSourceName(identifier string) string {
-	// 末尾の.gitを除去
-	url := strings.TrimSuffix(identifier, ".git")
-
-	// SSH形式（git@host:path）の場合
-	if strings.Contains(url, "@") && strings.Contains(url, ":") {
-		// git@github.com:user/repo の形式
-		atIdx := strings.Index(url, "@")
-		colonIdx := strings.Index(url[atIdx:], ":")
-		if colonIdx > 0 {
-			host := url[atIdx+1 : atIdx+colonIdx]
-			path := url[atIdx+colonIdx+1:]
-			return host + "/" + path
-		}
+	// GitClientのURLToDirectoryNameを利用してソース名を生成
+	dirName, err := p.gitClient.URLToDirectoryName(identifier)
+	if err != nil {
+		// パースに失敗した場合は元の文字列から.gitを除去して返す
+		return strings.TrimSuffix(identifier, ".git")
 	}
-
-	// HTTPS形式（https://host/path）の場合
-	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
-		// プロトコル部分を除去
-		url = strings.TrimPrefix(url, "https://")
-		url = strings.TrimPrefix(url, "http://")
-		return url
-	}
-
-	// その他の場合はそのまま返す
-	return url
+	return dirName
 }
 
 // FetchDocuments はGitリポジトリからドキュメント一覧を取得します
@@ -73,14 +54,14 @@ func (p *Provider) FetchDocuments(ctx context.Context, params provider.IndexPara
 		ref = p.defaultBranch
 	}
 
-	// sourceIDを取得（クローン先ディレクトリパス生成用）
-	p.sourceID, ok = params.Options["sourceID"].(string)
-	if !ok || p.sourceID == "" {
-		return nil, "", fmt.Errorf("sourceID is required in options")
+	// Git URLからディレクトリ名を生成
+	dirName, err := p.gitClient.URLToDirectoryName(params.Identifier)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate directory name from URL: %w", err)
 	}
 
 	// Gitリポジトリのクローン/pull
-	repoPath := filepath.Join(p.gitCloneBaseDir, p.sourceID)
+	repoPath := filepath.Join(p.gitCloneBaseDir, dirName)
 	if err := p.gitClient.CloneOrPull(ctx, params.Identifier, repoPath, ref); err != nil {
 		return nil, "", fmt.Errorf("failed to clone/pull repository: %w", err)
 	}

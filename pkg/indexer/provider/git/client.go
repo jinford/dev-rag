@@ -7,12 +7,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
+	giturls "github.com/whilp/git-urls"
 )
 
 // GitClient は Git リポジトリ操作を提供します
@@ -29,6 +31,31 @@ func NewGitClient(sshKeyPath, sshPassword string) *GitClient {
 		sshKeyPath:  sshKeyPath,
 		sshPassword: sshPassword,
 	}
+}
+
+// URLToDirectoryName はGit URLをディレクトリ名に変換します
+// 例: https://github.com/hoge/fuga.git -> github.com/hoge/fuga
+// 例: git@github.com:hoge/fuga.git -> github.com/hoge/fuga
+// 例: https://github.com:8080/hoge/fuga.git -> github.com/hoge/fuga
+func (c *GitClient) URLToDirectoryName(gitURL string) (string, error) {
+	u, err := giturls.Parse(gitURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse git URL: %w", err)
+	}
+
+	// ホスト名のみを取得（ポート番号を除外）
+	hostname := u.Hostname()
+	if hostname == "" {
+		// Hostname()が空の場合はHostをそのまま使う
+		hostname = u.Host
+	}
+
+	// パスから .git サフィックスを削除
+	path := strings.TrimPrefix(u.Path, "/")
+	path = strings.TrimSuffix(path, ".git")
+
+	// ホスト名/パスの形式で返す
+	return filepath.Join(hostname, path), nil
 }
 
 // CommitInfo はコミット情報を表します
