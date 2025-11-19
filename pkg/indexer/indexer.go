@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -186,6 +187,10 @@ func (idx *Indexer) loadPreviousSnapshot(ctx context.Context, source *models.Sou
 	// 最新のインデックス済みスナップショットを取得
 	latestSnapshot, err := idx.sourceReadRepo.GetLatestIndexedSnapshot(ctx, source.ID)
 	if err != nil {
+		// スナップショットが存在しない場合は初回インデックスとして扱う
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, make(map[string]string), nil
+		}
 		return nil, nil, fmt.Errorf("failed to get latest indexed snapshot: %w", err)
 	}
 

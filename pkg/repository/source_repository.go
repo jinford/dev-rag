@@ -210,7 +210,7 @@ func (r *SourceRepositoryR) GetLatestIndexedSnapshot(ctx context.Context, source
 	sqlcSnapshot, err := r.q.GetLatestIndexedSnapshot(ctx, UUIDToPgtype(sourceID))
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("indexed snapshot not found for source: %s", sourceID)
+			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get latest indexed snapshot: %w", err)
 	}
