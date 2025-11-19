@@ -188,7 +188,7 @@ func (r *SourceRepositoryR) GetSnapshotByVersion(ctx context.Context, sourceID u
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("snapshot not found: %s@%s", sourceID, versionIdentifier)
+			return nil, fmt.Errorf("%w: snapshot %s@%s", ErrNotFound, sourceID, versionIdentifier)
 		}
 		return nil, fmt.Errorf("failed to get snapshot: %w", err)
 	}

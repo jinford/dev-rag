@@ -391,27 +391,30 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 		}
 		defer advisoryLock.Release(ctx)
 
-		// スナップショットを作成し、既存の場合は早期リターン
+		// アドバイザリロック取得後、既存スナップショットをチェック
+		existingSnapshot, err := adapters.Sources.GetSnapshotByVersion(ctx, params.source.ID, params.versionIdentifier)
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("failed to check existing snapshot: %w", err)
+		}
+
+		// 既に存在する場合は早期リターン
+		if existingSnapshot != nil {
+			idx.logger.Info("Snapshot already exists, skipping indexing",
+				"snapshotID", existingSnapshot.ID,
+				"versionIdentifier", params.versionIdentifier,
+			)
+
+			duration := time.Since(params.startTime)
+			return &IndexResult{
+				SnapshotID:        existingSnapshot.ID.String(),
+				VersionIdentifier: params.versionIdentifier,
+				Duration:          duration,
+			}, nil
+		}
+
+		// スナップショットを作成
 		snapshot, err := adapters.Sources.CreateSnapshot(ctx, params.source.ID, params.versionIdentifier)
 		if err != nil {
-			if repository.IsUniqueViolation(err) {
-				existingSnapshot, fetchErr := adapters.Sources.GetSnapshotByVersion(ctx, params.source.ID, params.versionIdentifier)
-				if fetchErr != nil {
-					return nil, fmt.Errorf("failed to fetch existing snapshot after conflict: %w", fetchErr)
-				}
-
-				idx.logger.Info("Snapshot already exists, skipping indexing",
-					"snapshotID", existingSnapshot.ID,
-					"versionIdentifier", params.versionIdentifier,
-				)
-
-				duration := time.Since(params.startTime)
-				return &IndexResult{
-					SnapshotID:        existingSnapshot.ID.String(),
-					VersionIdentifier: params.versionIdentifier,
-					Duration:          duration,
-				}, nil
-			}
 			return nil, fmt.Errorf("failed to create snapshot: %w", err)
 		}
 
