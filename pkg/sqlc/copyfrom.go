@@ -36,6 +36,25 @@ func (r iteratorForCreateChunkBatch) Values() ([]interface{}, error) {
 		r.rows[0].Content,
 		r.rows[0].ContentHash,
 		r.rows[0].TokenCount,
+		r.rows[0].ChunkType,
+		r.rows[0].ChunkName,
+		r.rows[0].ParentName,
+		r.rows[0].Signature,
+		r.rows[0].DocComment,
+		r.rows[0].Imports,
+		r.rows[0].Calls,
+		r.rows[0].LinesOfCode,
+		r.rows[0].CommentRatio,
+		r.rows[0].CyclomaticComplexity,
+		r.rows[0].EmbeddingContext,
+		r.rows[0].SourceSnapshotID,
+		r.rows[0].GitCommitHash,
+		r.rows[0].Author,
+		r.rows[0].UpdatedAt,
+		r.rows[0].IndexedAt,
+		r.rows[0].FileVersion,
+		r.rows[0].IsLatest,
+		r.rows[0].ChunkKey,
 	}, nil
 }
 
@@ -44,7 +63,7 @@ func (r iteratorForCreateChunkBatch) Err() error {
 }
 
 func (q *Queries) CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"chunks"}, []string{"file_id", "ordinal", "start_line", "end_line", "content", "content_hash", "token_count"}, &iteratorForCreateChunkBatch{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"chunks"}, []string{"file_id", "ordinal", "start_line", "end_line", "content", "content_hash", "token_count", "chunk_type", "chunk_name", "parent_name", "signature", "doc_comment", "imports", "calls", "lines_of_code", "comment_ratio", "cyclomatic_complexity", "embedding_context", "source_snapshot_id", "git_commit_hash", "author", "updated_at", "indexed_at", "file_version", "is_latest", "chunk_key"}, &iteratorForCreateChunkBatch{rows: arg})
 }
 
 // iteratorForCreateEmbeddingBatch implements pgx.CopyFromSource.

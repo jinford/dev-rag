@@ -6,13 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/go-enry/go-enry/v2"
 	"github.com/google/uuid"
 
 	"github.com/jinford/dev-rag/pkg/indexer/chunker"
 	"github.com/jinford/dev-rag/pkg/indexer/detector"
-	"github.com/jinford/dev-rag/pkg/indexer/embedder"
+	embedpkg "github.com/jinford/dev-rag/pkg/indexer/embedder"
 	"github.com/jinford/dev-rag/pkg/indexer/provider"
 	"github.com/jinford/dev-rag/pkg/lock"
 	"github.com/jinford/dev-rag/pkg/models"
@@ -27,9 +30,11 @@ type Indexer struct {
 	txProvider     *txprovider.TransactionProvider
 	srcProviders   map[models.SourceType]provider.SourceProvider
 	chunker        *chunker.Chunker
-	embedder       *embedder.Embedder
+	embedder       *embedpkg.Embedder
+	contextBuilder *embedpkg.ContextBuilder
 	detector       *detector.ContentTypeDetector
 	logger         *slog.Logger
+	metrics        *IndexMetrics // Phase 1追加: メトリクス収集
 }
 
 // NewIndexer は新しいIndexerを作成します
@@ -38,10 +43,16 @@ func NewIndexer(
 	indexRepo *repository.IndexRepositoryR,
 	txProvider *txprovider.TransactionProvider,
 	chunker *chunker.Chunker,
-	embedder *embedder.Embedder,
+	embedder *embedpkg.Embedder,
 	detector *detector.ContentTypeDetector,
 	logger *slog.Logger,
 ) (*Indexer, error) {
+	// ContextBuilderを初期化
+	contextBuilder, err := embedpkg.NewContextBuilder()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create context builder: %w", err)
+	}
+
 	return &Indexer{
 		sourceReadRepo: sourceRepo,
 		indexReadRepo:  indexRepo,
@@ -49,8 +60,10 @@ func NewIndexer(
 		srcProviders:   make(map[models.SourceType]provider.SourceProvider),
 		chunker:        chunker,
 		embedder:       embedder,
+		contextBuilder: contextBuilder,
 		detector:       detector,
 		logger:         logger,
+		metrics:        NewIndexMetrics(), // Phase 1追加: メトリクス初期化
 	}, nil
 }
 
@@ -77,6 +90,9 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 	}
 
 	startTime := time.Now()
+	// メトリクスをリセット
+	idx.metrics = NewIndexMetrics()
+
 	idx.logger.Info("Starting index process",
 		"sourceType", prov.GetSourceType(),
 		"identifier", params.Identifier,
@@ -102,8 +118,11 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 		return nil, err
 	}
 
+	// Source名を抽出（chunk_key生成用）
+	sourceName := prov.ExtractSourceName(params.Identifier)
+
 	// 非トランザクションでチャンク化・Embedding 済みデータを構築
-	preparedDocs, err := idx.prepareDocuments(ctx, prov, documents, previousFileHashes)
+	preparedDocs, err := idx.prepareDocuments(ctx, prov, documents, previousFileHashes, params.ProductName, sourceName)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +148,9 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 		return nil, err
 	}
 
+	// メトリクスをログ出力
+	idx.logMetrics()
+
 	idx.logger.Info("Index process completed",
 		"snapshotID", result.SnapshotID,
 		"processedFiles", result.ProcessedFiles,
@@ -153,6 +175,19 @@ type preparedFile struct {
 	ContentType string
 	ContentHash string
 	Chunks      []*preparedChunk
+
+	// Phase 1追加: コミットメタデータ
+	CommitHash string
+	Author     string
+	UpdatedAt  time.Time
+
+	// Phase 1追加: chunk_key生成用
+	ProductName string
+	SourceName  string
+
+	// Phase 1追加: 言語とドメイン
+	Language *string
+	Domain   *string
 }
 
 type preparedChunk struct {
@@ -162,6 +197,7 @@ type preparedChunk struct {
 	Tokens    int
 	Hash      string
 	Embedding []float32
+	Metadata  *repository.ChunkMetadata // Phase 1追加
 }
 
 // commitPreparedDocumentParams は書き込み処理に必要な情報をまとめます
@@ -227,7 +263,7 @@ func (idx *Indexer) ensureSource(ctx context.Context, prov provider.SourceProvid
 }
 
 // prepareDocuments はチャンク化・Embedding 済みのドキュメント群を構築します
-func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourceProvider, documents []*provider.SourceDocument, previousFileHashes map[string]string) (*preparedDocumentsResult, error) {
+func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourceProvider, documents []*provider.SourceDocument, previousFileHashes map[string]string, productName, sourceName string) (*preparedDocumentsResult, error) {
 	prepared := &preparedDocumentsResult{
 		files:           make([]*preparedFile, 0, len(documents)),
 		currentDocPaths: make(map[string]bool, len(documents)),
@@ -252,20 +288,24 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 		// コンテンツタイプに応じてチャンク戦略を選択
 		contentType := idx.detector.DetectContentType(doc.Path, []byte(doc.Content))
 
-		// コンテンツをチャンク化
-		chunks, err := idx.chunker.Chunk(doc.Content, contentType)
+		// 言語検出とドメイン分類を実行
+		language := idx.detectLanguage(doc.Path, doc.Content)
+		domain := idx.classifyDomain(doc.Path)
+
+		// コンテンツをチャンク化（メタデータ付き、メトリクス収集）
+		chunksWithMeta, err := idx.chunker.ChunkWithMetadataAndMetrics(doc.Content, contentType, idx.metrics, idx.logger)
 		if err != nil {
 			idx.logger.Warn("Failed to chunk document", "path", doc.Path, "error", err)
 			continue
 		}
 
-		if len(chunks) == 0 {
+		if len(chunksWithMeta) == 0 {
 			idx.logger.Debug("No chunks generated", "path", doc.Path)
 			continue
 		}
 
 		// Embedding を含んだチャンク構造を準備
-		chunkPayloads, err := idx.prepareChunks(ctx, chunks)
+		chunkPayloads, err := idx.prepareChunks(ctx, chunksWithMeta, doc.Path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to prepare chunks for file %s: %w", doc.Path, err)
 		}
@@ -276,6 +316,16 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 			ContentType: contentType,
 			ContentHash: doc.ContentHash,
 			Chunks:      chunkPayloads,
+			// Phase 1追加: コミットメタデータを保持
+			CommitHash:  doc.CommitHash,
+			Author:      doc.Author,
+			UpdatedAt:   doc.UpdatedAt,
+			// Phase 1追加: chunk_key生成用の情報を保持
+			ProductName: productName,
+			SourceName:  sourceName,
+			// Phase 1追加: 言語とドメイン
+			Language:    language,
+			Domain:      domain,
 		})
 
 		prepared.processedFiles++
@@ -309,29 +359,39 @@ func detectDeletedPaths(previousFileHashes map[string]string, currentDocPaths ma
 }
 
 // prepareChunks はチャンク化済みデータに対してEmbeddingとハッシュを付与します
-func (idx *Indexer) prepareChunks(ctx context.Context, chunks []*chunker.Chunk) ([]*preparedChunk, error) {
-	prepared := make([]*preparedChunk, 0, len(chunks))
-	contents := make([]string, 0, len(chunks))
-	for _, chunk := range chunks {
-		// Embedding API 呼び出し用に内容のみを抽出
-		contents = append(contents, chunk.Content)
+func (idx *Indexer) prepareChunks(ctx context.Context, chunksWithMeta []*chunker.ChunkWithMetadata, filePath string) ([]*preparedChunk, error) {
+	prepared := make([]*preparedChunk, 0, len(chunksWithMeta))
+	embeddingTexts := make([]string, 0, len(chunksWithMeta))
+
+	// Embeddingコンテキストを構築
+	for _, cwm := range chunksWithMeta {
+		// Embedding用の拡張コンテキストを構築
+		embeddingContext := idx.contextBuilder.BuildContext(cwm.Chunk, cwm.Metadata, filePath)
+		embeddingTexts = append(embeddingTexts, embeddingContext)
+
+		// メタデータにEmbeddingContextを保存（後でDBに保存）
+		if cwm.Metadata != nil {
+			cwm.Metadata.EmbeddingContext = &embeddingContext
+		}
 	}
 
 	// バッチでEmbeddingを生成（最大100件ずつ）
+	// コンテキスト付きテキストでEmbeddingを生成
 	batchSize := 100
-	for i := 0; i < len(contents); i += batchSize {
+	for i := 0; i < len(embeddingTexts); i += batchSize {
 		end := i + batchSize
-		if end > len(contents) {
-			end = len(contents)
+		if end > len(embeddingTexts) {
+			end = len(embeddingTexts)
 		}
 
-		batch := contents[i:end]
+		batch := embeddingTexts[i:end]
 		embeddings, err := idx.embedder.BatchEmbed(ctx, batch)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate embeddings: %w", err)
 		}
 
-		for j, chunk := range chunks[i:end] {
+		for j, cwm := range chunksWithMeta[i:end] {
+			chunk := cwm.Chunk
 			// チャンクハッシュを計算し、Embedding と紐付けて保持
 			chunkHash := fmt.Sprintf("%x", sha256.Sum256([]byte(chunk.Content)))
 			prepared = append(prepared, &preparedChunk{
@@ -341,6 +401,7 @@ func (idx *Indexer) prepareChunks(ctx context.Context, chunks []*chunker.Chunk) 
 				Tokens:    chunk.Tokens,
 				Hash:      chunkHash,
 				Embedding: embeddings[j],
+				Metadata:  cwm.Metadata, // メタデータを保持（EmbeddingContext含む）
 			})
 		}
 	}
@@ -348,10 +409,155 @@ func (idx *Indexer) prepareChunks(ctx context.Context, chunks []*chunker.Chunk) 
 	return prepared, nil
 }
 
+// logMetrics は収集したメトリクスをログ出力します
+func (idx *Indexer) logMetrics() {
+	if idx.metrics.ASTParseAttempts > 0 {
+		idx.logger.Info("AST parsing metrics",
+			"attempts", idx.metrics.ASTParseAttempts,
+			"successes", idx.metrics.ASTParseSuccesses,
+			"failures", idx.metrics.ASTParseFailures,
+			"successRate", fmt.Sprintf("%.2f%%", idx.metrics.ASTParseSuccessRate()*100),
+			"failureRate", fmt.Sprintf("%.2f%%", idx.metrics.ASTParseFailureRate()*100),
+		)
+	}
+
+	if idx.metrics.MetadataExtractAttempts > 0 {
+		idx.logger.Info("Metadata extraction metrics",
+			"attempts", idx.metrics.MetadataExtractAttempts,
+			"successes", idx.metrics.MetadataExtractSuccesses,
+			"failures", idx.metrics.MetadataExtractFailures,
+			"successRate", fmt.Sprintf("%.2f%%", idx.metrics.MetadataExtractSuccessRate()*100),
+		)
+	}
+
+	if idx.metrics.HighCommentRatioExcluded > 0 {
+		idx.logger.Info("Chunk quality metrics",
+			"highCommentRatioExcluded", idx.metrics.HighCommentRatioExcluded,
+		)
+	}
+
+	if len(idx.metrics.CyclomaticComplexities) > 0 {
+		idx.logger.Info("Cyclomatic complexity distribution",
+			"count", len(idx.metrics.CyclomaticComplexities),
+			"p50", idx.metrics.CyclomaticComplexityP50(),
+			"p95", idx.metrics.CyclomaticComplexityP95(),
+			"p99", idx.metrics.CyclomaticComplexityP99(),
+		)
+	}
+}
+
+// detectLanguage はファイルパスとコンテンツから言語を検出します
+func (idx *Indexer) detectLanguage(path string, content string) *string {
+	// go-enryを使用して言語を検出
+	language := enry.GetLanguage(filepath.Base(path), []byte(content))
+	if language == "" {
+		return nil
+	}
+	return &language
+}
+
+// classifyDomain はファイルパスからドメインを分類します
+func (idx *Indexer) classifyDomain(path string) *string {
+	lowerPath := strings.ToLower(path)
+
+	// テストファイル（優先度高い順にチェック）
+	if strings.Contains(lowerPath, "_test.go") ||
+		strings.Contains(lowerPath, "_test.") ||
+		strings.Contains(lowerPath, "/test/") ||
+		strings.Contains(lowerPath, "/tests/") ||
+		strings.Contains(lowerPath, "/__tests__/") ||
+		strings.Contains(lowerPath, "/spec/") ||
+		strings.HasPrefix(lowerPath, "test/") ||
+		strings.HasPrefix(lowerPath, "tests/") ||
+		strings.HasPrefix(lowerPath, "spec/") {
+		domain := "tests"
+		return &domain
+	}
+
+	// 運用スクリプト（ドキュメントより前にチェック）
+	if strings.Contains(lowerPath, "/scripts/") ||
+		strings.Contains(lowerPath, "/ops/") ||
+		strings.HasPrefix(lowerPath, "scripts/") ||
+		strings.HasPrefix(lowerPath, "ops/") ||
+		strings.HasSuffix(lowerPath, ".sh") ||
+		strings.HasSuffix(lowerPath, ".bash") {
+		domain := "ops"
+		return &domain
+	}
+
+	// ドキュメント
+	if strings.Contains(lowerPath, "/docs/") ||
+		strings.Contains(lowerPath, "/doc/") ||
+		strings.HasPrefix(lowerPath, "docs/") ||
+		strings.HasPrefix(lowerPath, "doc/") ||
+		strings.HasSuffix(lowerPath, ".md") ||
+		strings.HasSuffix(lowerPath, ".markdown") ||
+		strings.HasSuffix(lowerPath, ".rst") ||
+		strings.HasSuffix(lowerPath, ".adoc") {
+		domain := "architecture"
+		return &domain
+	}
+
+	// インフラストラクチャ
+	if strings.Contains(lowerPath, "dockerfile") ||
+		strings.Contains(lowerPath, "docker-compose") ||
+		strings.HasSuffix(lowerPath, ".yml") ||
+		strings.HasSuffix(lowerPath, ".yaml") ||
+		strings.Contains(lowerPath, "/terraform/") ||
+		strings.Contains(lowerPath, "/ansible/") ||
+		strings.Contains(lowerPath, "/k8s/") ||
+		strings.Contains(lowerPath, "/kubernetes/") ||
+		strings.HasPrefix(lowerPath, "terraform/") ||
+		strings.HasPrefix(lowerPath, "ansible/") ||
+		strings.HasPrefix(lowerPath, "k8s/") ||
+		strings.HasPrefix(lowerPath, "kubernetes/") ||
+		strings.HasSuffix(lowerPath, ".tf") {
+		domain := "infra"
+		return &domain
+	}
+
+	// デフォルトはcode
+	domain := "code"
+	return &domain
+}
+
 // persistPreparedChunks は事前計算したチャンク/EmbeddingをDBへ保存します
-func (idx *Indexer) persistPreparedChunks(ctx context.Context, indexRepo *repository.IndexRepositoryRW, fileID uuid.UUID, preparedChunks []*preparedChunk) error {
+func (idx *Indexer) persistPreparedChunks(ctx context.Context, indexRepo *repository.IndexRepositoryRW, fileID, snapshotID uuid.UUID, file *preparedFile, preparedChunks []*preparedChunk) error {
 	for ordinal, chunk := range preparedChunks {
-		// チャンク本体を保存
+		// chunk_keyを生成: {product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}
+		chunkKey := fmt.Sprintf("%s/%s/%s#L%d-L%d@%s",
+			file.ProductName,
+			file.SourceName,
+			file.Path,
+			chunk.StartLine,
+			chunk.EndLine,
+			file.CommitHash,
+		)
+
+		// デバッグログ: 最初のチャンクのみchunk_keyを出力
+		if ordinal == 0 {
+			idx.logger.Debug("Generated chunk_key",
+				"chunk_key", chunkKey,
+				"author", file.Author,
+				"updated_at", file.UpdatedAt,
+			)
+		}
+
+		// メタデータが存在しない場合は新規作成
+		metadata := chunk.Metadata
+		if metadata == nil {
+			metadata = &repository.ChunkMetadata{}
+		}
+
+		// トレーサビリティ情報とchunk_keyを設定
+		metadata.SourceSnapshotID = &snapshotID
+		metadata.GitCommitHash = &file.CommitHash
+		metadata.Author = &file.Author
+		metadata.UpdatedAt = &file.UpdatedAt
+		metadata.IsLatest = true
+		metadata.ChunkKey = chunkKey
+
+		// チャンク本体を保存（メタデータ付き）
 		createdChunk, err := indexRepo.CreateChunk(
 			ctx,
 			fileID,
@@ -361,6 +567,7 @@ func (idx *Indexer) persistPreparedChunks(ctx context.Context, indexRepo *reposi
 			chunk.Content,
 			chunk.Hash,
 			chunk.Tokens,
+			metadata,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to create chunk: %w", err)
@@ -435,12 +642,14 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 				file.Size,
 				file.ContentType,
 				file.ContentHash,
+				file.Language, // Phase 1: 言語情報を渡す
+				file.Domain,   // Phase 1: ドメイン情報を渡す
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create file %s: %w", file.Path, err)
 			}
 
-			if err := idx.persistPreparedChunks(ctx, adapters.Index, createdFile.ID, file.Chunks); err != nil {
+			if err := idx.persistPreparedChunks(ctx, adapters.Index, createdFile.ID, snapshot.ID, file, file.Chunks); err != nil {
 				return nil, fmt.Errorf("failed to persist chunks for file %s: %w", file.Path, err)
 			}
 		}

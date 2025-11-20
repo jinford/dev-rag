@@ -12,9 +12,9 @@ import (
 )
 
 const createFile = `-- name: CreateFile :one
-INSERT INTO files (snapshot_id, path, size, content_type, content_hash)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, snapshot_id, path, size, content_type, content_hash, created_at
+INSERT INTO files (snapshot_id, path, size, content_type, content_hash, language, domain)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at
 `
 
 type CreateFileParams struct {
@@ -23,6 +23,8 @@ type CreateFileParams struct {
 	Size        int64       `json:"size"`
 	ContentType string      `json:"content_type"`
 	ContentHash string      `json:"content_hash"`
+	Language    pgtype.Text `json:"language"`
+	Domain      pgtype.Text `json:"domain"`
 }
 
 func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, error) {
@@ -32,6 +34,8 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		arg.Size,
 		arg.ContentType,
 		arg.ContentHash,
+		arg.Language,
+		arg.Domain,
 	)
 	var i File
 	err := row.Scan(
@@ -41,6 +45,8 @@ func (q *Queries) CreateFile(ctx context.Context, arg CreateFileParams) (File, e
 		&i.Size,
 		&i.ContentType,
 		&i.ContentHash,
+		&i.Language,
+		&i.Domain,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -82,7 +88,7 @@ func (q *Queries) DeleteFilesBySnapshot(ctx context.Context, snapshotID pgtype.U
 }
 
 const findFilesByContentHash = `-- name: FindFilesByContentHash :many
-SELECT id, snapshot_id, path, size, content_type, content_hash, created_at FROM files
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE content_hash = $1
 ORDER BY created_at DESC
 `
@@ -103,6 +109,8 @@ func (q *Queries) FindFilesByContentHash(ctx context.Context, contentHash string
 			&i.Size,
 			&i.ContentType,
 			&i.ContentHash,
+			&i.Language,
+			&i.Domain,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -116,7 +124,7 @@ func (q *Queries) FindFilesByContentHash(ctx context.Context, contentHash string
 }
 
 const getFile = `-- name: GetFile :one
-SELECT id, snapshot_id, path, size, content_type, content_hash, created_at FROM files
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE id = $1
 `
 
@@ -130,13 +138,15 @@ func (q *Queries) GetFile(ctx context.Context, id pgtype.UUID) (File, error) {
 		&i.Size,
 		&i.ContentType,
 		&i.ContentHash,
+		&i.Language,
+		&i.Domain,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getFileByPath = `-- name: GetFileByPath :one
-SELECT id, snapshot_id, path, size, content_type, content_hash, created_at FROM files
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE snapshot_id = $1 AND path = $2
 `
 
@@ -155,6 +165,8 @@ func (q *Queries) GetFileByPath(ctx context.Context, arg GetFileByPathParams) (F
 		&i.Size,
 		&i.ContentType,
 		&i.ContentHash,
+		&i.Language,
+		&i.Domain,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -192,7 +204,7 @@ func (q *Queries) GetFileHashesBySnapshot(ctx context.Context, snapshotID pgtype
 }
 
 const listFilesByContentType = `-- name: ListFilesByContentType :many
-SELECT id, snapshot_id, path, size, content_type, content_hash, created_at FROM files
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE snapshot_id = $1 AND content_type = $2
 ORDER BY path
 `
@@ -218,6 +230,8 @@ func (q *Queries) ListFilesByContentType(ctx context.Context, arg ListFilesByCon
 			&i.Size,
 			&i.ContentType,
 			&i.ContentHash,
+			&i.Language,
+			&i.Domain,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -231,7 +245,7 @@ func (q *Queries) ListFilesByContentType(ctx context.Context, arg ListFilesByCon
 }
 
 const listFilesBySnapshot = `-- name: ListFilesBySnapshot :many
-SELECT id, snapshot_id, path, size, content_type, content_hash, created_at FROM files
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE snapshot_id = $1
 ORDER BY path
 `
@@ -252,6 +266,8 @@ func (q *Queries) ListFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUI
 			&i.Size,
 			&i.ContentType,
 			&i.ContentHash,
+			&i.Language,
+			&i.Domain,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

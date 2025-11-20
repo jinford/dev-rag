@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -100,4 +101,84 @@ func PgtypeToInt(i pgtype.Int4) int {
 		return 0
 	}
 	return int(i.Int32)
+}
+
+// === Phase 1追加: 新しい型変換関数 ===
+
+// UUIDPtrToPgtype converts *uuid.UUID to pgtype.UUID
+func UUIDPtrToPgtype(id *uuid.UUID) pgtype.UUID {
+	if id == nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: *id, Valid: true}
+}
+
+// PgtypeToUUIDPtr converts pgtype.UUID to *uuid.UUID
+func PgtypeToUUIDPtr(id pgtype.UUID) *uuid.UUID {
+	if !id.Valid {
+		return nil
+	}
+	uid := uuid.UUID(id.Bytes)
+	return &uid
+}
+
+// IntPtrToPgInt4 converts *int to pgtype.Int4
+func IntPtrToPgInt4(i *int) pgtype.Int4 {
+	if i == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*i), Valid: true}
+}
+
+// Float64PtrToPgNumeric converts *float64 to pgtype.Numeric
+func Float64PtrToPgNumeric(f *float64) pgtype.Numeric {
+	if f == nil {
+		return pgtype.Numeric{}
+	}
+	// float64をstringに変換してからNumericに変換
+	var num pgtype.Numeric
+	_ = num.Scan(*f)
+	return num
+}
+
+// PgtypeToFloat64Ptr converts pgtype.Numeric to *float64
+func PgtypeToFloat64Ptr(n pgtype.Numeric) *float64 {
+	if !n.Valid {
+		return nil
+	}
+	f, _ := n.Float64Value()
+	val := f.Float64
+	return &val
+}
+
+// TimePtrToPgtimestamp converts *time.Time to pgtype.Timestamp
+func TimePtrToPgtimestamp(t *time.Time) pgtype.Timestamp {
+	if t == nil {
+		return pgtype.Timestamp{}
+	}
+	return pgtype.Timestamp{Time: *t, Valid: true}
+}
+
+// TimeToPgtimestamp converts time.Time to pgtype.Timestamp
+func TimeToPgtimestamp(t time.Time) pgtype.Timestamp {
+	return pgtype.Timestamp{Time: t, Valid: true}
+}
+
+// JSONBFromStringSlice converts []string to []byte (JSONB)
+func JSONBFromStringSlice(s []string) []byte {
+	if s == nil {
+		return nil
+	}
+	b, _ := json.Marshal(s)
+	return b
+}
+
+// StringSliceFromJSONB converts []byte (JSONB) to []string
+func StringSliceFromJSONB(b []byte) []string {
+	if b == nil {
+		return nil
+	}
+	var s []string
+	_ = json.Unmarshal(b, &s)
+	return s
 }

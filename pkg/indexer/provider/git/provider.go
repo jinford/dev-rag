@@ -66,10 +66,16 @@ func (p *Provider) FetchDocuments(ctx context.Context, params provider.IndexPara
 		return nil, "", fmt.Errorf("failed to clone/pull repository: %w", err)
 	}
 
-	// コミット情報を取得
+	// コミット情報を取得（バージョン識別子として使用）
 	commitInfo, err := p.gitClient.GetCommitInfo(ctx, repoPath, ref)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get commit info: %w", err)
+	}
+
+	// 全ファイルの最終更新コミット情報を一括取得
+	fileLastCommits, err := p.gitClient.GetFileLastCommits(ctx, repoPath, ref)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get file last commits: %w", err)
 	}
 
 	// ファイル一覧を取得
@@ -95,11 +101,22 @@ func (p *Provider) FetchDocuments(ctx context.Context, params provider.IndexPara
 			continue
 		}
 
+		// マップから各ファイルのコミット情報を取得
+		fileCommit, ok := fileLastCommits[fileInfo.Path]
+		if !ok {
+			// コミット情報が取得できなかった場合はリポジトリ全体の最新コミット情報を使用（フォールバック）
+			fileCommit = commitInfo
+		}
+
 		documents = append(documents, &provider.SourceDocument{
 			Path:        fileInfo.Path,
 			Content:     content,
 			Size:        fileInfo.Size,
 			ContentHash: fileInfo.ContentHash,
+			// ファイル固有のコミット情報を設定
+			CommitHash: fileCommit.Hash,
+			Author:     fileCommit.Author,
+			UpdatedAt:  fileCommit.Date,
 		})
 	}
 

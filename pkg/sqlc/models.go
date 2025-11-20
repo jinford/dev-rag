@@ -26,8 +26,46 @@ type Chunk struct {
 	// チャンク内容のSHA-256ハッシュ
 	ContentHash string `json:"content_hash"`
 	// 推定トークン数
-	TokenCount pgtype.Int4      `json:"token_count"`
-	CreatedAt  pgtype.Timestamp `json:"created_at"`
+	TokenCount pgtype.Int4 `json:"token_count"`
+	// チャンクの種類（function, method, struct, interface, const, var等）
+	ChunkType pgtype.Text `json:"chunk_type"`
+	// 関数名、クラス名、メソッド名等
+	ChunkName pgtype.Text `json:"chunk_name"`
+	// 所属する構造体名、パッケージ名等
+	ParentName pgtype.Text `json:"parent_name"`
+	// 関数シグネチャ（引数、戻り値）
+	Signature pgtype.Text `json:"signature"`
+	// ドキュメントコメント（GoDocコメント等）
+	DocComment pgtype.Text `json:"doc_comment"`
+	// インポートされているパッケージリスト（JSON配列）
+	Imports []byte `json:"imports"`
+	// 呼び出されている関数リスト（JSON配列）
+	Calls []byte `json:"calls"`
+	// コード行数（コメント・空行を除く）
+	LinesOfCode pgtype.Int4 `json:"lines_of_code"`
+	// コメント比率（0.00〜1.00）
+	CommentRatio pgtype.Numeric `json:"comment_ratio"`
+	// 循環的複雑度（McCabe複雑度）
+	CyclomaticComplexity pgtype.Int4 `json:"cyclomatic_complexity"`
+	// Embedding生成用の拡張コンテキスト
+	EmbeddingContext pgtype.Text `json:"embedding_context"`
+	// 所属するスナップショットID（トレーサビリティ用）
+	SourceSnapshotID pgtype.UUID `json:"source_snapshot_id"`
+	// Gitコミットハッシュ（トレーサビリティ用）
+	GitCommitHash pgtype.Text `json:"git_commit_hash"`
+	// 最終更新者（Git author）
+	Author pgtype.Text `json:"author"`
+	// ファイル最終更新日時（コミット日時）
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
+	// インデックス作成日時
+	IndexedAt pgtype.Timestamp `json:"indexed_at"`
+	// ファイルバージョン識別子（オプション）
+	FileVersion pgtype.Text `json:"file_version"`
+	// 最新バージョンフラグ（true=最新、false=過去バージョン）
+	IsLatest bool `json:"is_latest"`
+	// 決定的な識別子（{product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}）
+	ChunkKey  string           `json:"chunk_key"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
 // チャンクのEmbeddingベクトル
@@ -54,8 +92,12 @@ type File struct {
 	// MIMEタイプ形式のコンテンツ種別（例: text/x-go, text/x-python, text/markdown, application/pdf, text/html）
 	ContentType string `json:"content_type"`
 	// ファイル内容のSHA-256ハッシュ
-	ContentHash string           `json:"content_hash"`
-	CreatedAt   pgtype.Timestamp `json:"created_at"`
+	ContentHash string `json:"content_hash"`
+	// プログラミング言語（go-enryによる自動検出）
+	Language pgtype.Text `json:"language"`
+	// ドメイン分類（code, architecture, ops, tests, infra）
+	Domain    pgtype.Text      `json:"domain"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
 // Git専用の参照（ブランチ、タグ）管理

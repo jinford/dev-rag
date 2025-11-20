@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"time"
 
 	"github.com/jinford/dev-rag/pkg/models"
 )
@@ -20,6 +21,11 @@ type SourceDocument struct {
 	Content     string // ドキュメントの内容
 	Size        int64  // ドキュメントのサイズ（バイト）
 	ContentHash string // ドキュメント内容のハッシュ
+
+	// コミットメタデータ (Phase 1追加)
+	CommitHash string    // Gitコミットハッシュ
+	Author     string    // 最終更新者
+	UpdatedAt  time.Time // ファイル最終更新日時
 }
 
 // SourceProvider はソースタイプごとの具体的な実装を提供するインターフェースです

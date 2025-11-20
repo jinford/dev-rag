@@ -184,6 +184,67 @@ func (c *GitClient) GetCommitInfo(ctx context.Context, repoPath, ref string) (*C
 	}, nil
 }
 
+// GetFileLastCommits は全ファイルの最終更新コミット情報を一括取得します
+// git log の履歴を遡り、各ファイルが最初に出現したコミットを最終更新コミットとして記録します
+// パフォーマンス: O(N) の時間複雑度で動作します（ファイル数 N に対して）
+func (c *GitClient) GetFileLastCommits(ctx context.Context, repoPath, ref string) (map[string]*CommitInfo, error) {
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// refを解決
+	hash, err := c.resolveRef(repo, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// コミット履歴を取得（指定されたrefから）
+	commitIter, err := repo.Log(&git.LogOptions{
+		From: hash,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit log: %w", err)
+	}
+	defer commitIter.Close()
+
+	// ファイルパス→最終更新コミット情報のマップ
+	fileLastCommits := make(map[string]*CommitInfo)
+
+	// コミット履歴を遡り、各ファイルの最終更新コミットを記録
+	err = commitIter.ForEach(func(commit *object.Commit) error {
+		// コミットのツリーを取得
+		tree, err := commit.Tree()
+		if err != nil {
+			return fmt.Errorf("failed to get tree for commit %s: %w", commit.Hash, err)
+		}
+
+		// ツリー内の全ファイルを走査
+		err = tree.Files().ForEach(func(f *object.File) error {
+			// まだ記録されていないファイルの場合、このコミットを最終更新コミットとして記録
+			if _, exists := fileLastCommits[f.Name]; !exists {
+				fileLastCommits[f.Name] = &CommitInfo{
+					Hash:    commit.Hash.String(),
+					Date:    commit.Author.When,
+					Message: commit.Message,
+					Author:  commit.Author.Name,
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to iterate files in commit %s: %w", commit.Hash, err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate commits: %w", err)
+	}
+
+	return fileLastCommits, nil
+}
+
 // ListFiles は指定されたrefのファイル一覧を取得します
 func (c *GitClient) ListFiles(ctx context.Context, repoPath, ref string) ([]*FileInfo, error) {
 	repo, err := git.PlainOpen(repoPath)

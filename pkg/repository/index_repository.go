@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -37,16 +38,45 @@ type SearchFilter struct {
 	ContentType *string
 }
 
+// ChunkMetadata はチャンクのメタデータを表します (Phase 1追加)
+type ChunkMetadata struct {
+	// 構造メタデータ
+	Type                 *string
+	Name                 *string
+	ParentName           *string
+	Signature            *string
+	DocComment           *string
+	Imports              []string
+	Calls                []string
+	LinesOfCode          *int
+	CommentRatio         *float64
+	CyclomaticComplexity *int
+	EmbeddingContext     *string
+
+	// トレーサビリティ・バージョン管理
+	SourceSnapshotID *uuid.UUID
+	GitCommitHash    *string
+	Author           *string
+	UpdatedAt        *time.Time // ファイル最終更新日時
+	FileVersion      *string
+	IsLatest         bool
+
+	// 決定的な識別子
+	ChunkKey string // {product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}
+}
+
 // === File 操作 ===
 
 // CreateFile はファイルレコードを作成します
-func (rw *IndexRepositoryRW) CreateFile(ctx context.Context, snapshotID uuid.UUID, path string, size int64, contentType string, contentHash string) (*models.File, error) {
+func (rw *IndexRepositoryRW) CreateFile(ctx context.Context, snapshotID uuid.UUID, path string, size int64, contentType string, contentHash string, language *string, domain *string) (*models.File, error) {
 	file, err := rw.q.CreateFile(ctx, sqlc.CreateFileParams{
 		SnapshotID:  UUIDToPgtype(snapshotID),
 		Path:        path,
 		Size:        size,
 		ContentType: contentType,
 		ContentHash: contentHash,
+		Language:    StringPtrToPgtext(language),
+		Domain:      StringPtrToPgtext(domain),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create file: %w", err)
@@ -132,8 +162,20 @@ func (rw *IndexRepositoryRW) DeleteFilesByPaths(ctx context.Context, snapshotID 
 
 // === Chunk 操作 ===
 
-// CreateChunk はチャンクを1件作成します
-func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, ordinal int, startLine int, endLine int, content string, contentHash string, tokenCount int) (*models.Chunk, error) {
+// CreateChunk はチャンクを1件作成します (Phase 1拡張版)
+func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, ordinal int, startLine int, endLine int, content string, contentHash string, tokenCount int, metadata *ChunkMetadata) (*models.Chunk, error) {
+	// metadataがnilの場合はデフォルト値を使用（後方互換性のため）
+	if metadata == nil {
+		metadata = &ChunkMetadata{
+			IsLatest: true,
+			ChunkKey: "", // デフォルト値（空文字列）
+		}
+	}
+
+	// JSONBフィールドの準備
+	imports := JSONBFromStringSlice(metadata.Imports)
+	calls := JSONBFromStringSlice(metadata.Calls)
+
 	chunk, err := rw.q.CreateChunk(ctx, sqlc.CreateChunkParams{
 		FileID:      UUIDToPgtype(fileID),
 		Ordinal:     int32(ordinal),
@@ -142,6 +184,27 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 		Content:     content,
 		ContentHash: contentHash,
 		TokenCount:  IntToPgtype(tokenCount),
+		// 構造メタデータ
+		ChunkType:            StringPtrToPgtext(metadata.Type),
+		ChunkName:            StringPtrToPgtext(metadata.Name),
+		ParentName:           StringPtrToPgtext(metadata.ParentName),
+		Signature:            StringPtrToPgtext(metadata.Signature),
+		DocComment:           StringPtrToPgtext(metadata.DocComment),
+		Imports:              imports,
+		Calls:                calls,
+		LinesOfCode:          IntPtrToPgInt4(metadata.LinesOfCode),
+		CommentRatio:         Float64PtrToPgNumeric(metadata.CommentRatio),
+		CyclomaticComplexity: IntPtrToPgInt4(metadata.CyclomaticComplexity),
+		EmbeddingContext:     StringPtrToPgtext(metadata.EmbeddingContext),
+		// トレーサビリティ・バージョン管理
+		SourceSnapshotID: UUIDPtrToPgtype(metadata.SourceSnapshotID),
+		GitCommitHash:    StringPtrToPgtext(metadata.GitCommitHash),
+		Author:           StringPtrToPgtext(metadata.Author),
+		UpdatedAt:        TimePtrToPgtimestamp(metadata.UpdatedAt),
+		IndexedAt:        TimeToPgtimestamp(time.Now()),
+		FileVersion:      StringPtrToPgtext(metadata.FileVersion),
+		IsLatest:         metadata.IsLatest,
+		ChunkKey:         metadata.ChunkKey,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chunk: %w", err)
@@ -348,6 +411,8 @@ func convertSQLCFile(row sqlc.File) *models.File {
 		Size:        row.Size,
 		ContentType: row.ContentType,
 		ContentHash: row.ContentHash,
+		Language:    PgtextToStringPtr(row.Language),
+		Domain:      PgtextToStringPtr(row.Domain),
 		CreatedAt:   PgtypeToTime(row.CreatedAt),
 	}
 }
@@ -363,5 +428,27 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		ContentHash: row.ContentHash,
 		TokenCount:  PgtypeToInt(row.TokenCount),
 		CreatedAt:   PgtypeToTime(row.CreatedAt),
+		// 構造メタデータ (Phase 1追加)
+		Type:                 PgtextToStringPtr(row.ChunkType),
+		Name:                 PgtextToStringPtr(row.ChunkName),
+		ParentName:           PgtextToStringPtr(row.ParentName),
+		Signature:            PgtextToStringPtr(row.Signature),
+		DocComment:           PgtextToStringPtr(row.DocComment),
+		Imports:              StringSliceFromJSONB(row.Imports),
+		Calls:                StringSliceFromJSONB(row.Calls),
+		LinesOfCode:          PgtypeToIntPtr(row.LinesOfCode),
+		CommentRatio:         PgtypeToFloat64Ptr(row.CommentRatio),
+		CyclomaticComplexity: PgtypeToIntPtr(row.CyclomaticComplexity),
+		EmbeddingContext:     PgtextToStringPtr(row.EmbeddingContext),
+		// トレーサビリティ・バージョン管理 (Phase 1追加)
+		SourceSnapshotID: PgtypeToUUIDPtr(row.SourceSnapshotID),
+		GitCommitHash:    PgtextToStringPtr(row.GitCommitHash),
+		Author:           PgtextToStringPtr(row.Author),
+		UpdatedAt:        PgtypeToTimePtr(row.UpdatedAt),
+		IndexedAt:        PgtypeToTime(row.IndexedAt),
+		FileVersion:      PgtextToStringPtr(row.FileVersion),
+		IsLatest:         row.IsLatest,
+		// 決定的な識別子 (Phase 1追加)
+		ChunkKey: row.ChunkKey,
 	}
 }

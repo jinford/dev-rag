@@ -11,13 +11,32 @@ import (
 )
 
 type CreateChunkBatchParams struct {
-	FileID      pgtype.UUID `json:"file_id"`
-	Ordinal     int32       `json:"ordinal"`
-	StartLine   int32       `json:"start_line"`
-	EndLine     int32       `json:"end_line"`
-	Content     string      `json:"content"`
-	ContentHash string      `json:"content_hash"`
-	TokenCount  pgtype.Int4 `json:"token_count"`
+	FileID               pgtype.UUID      `json:"file_id"`
+	Ordinal              int32            `json:"ordinal"`
+	StartLine            int32            `json:"start_line"`
+	EndLine              int32            `json:"end_line"`
+	Content              string           `json:"content"`
+	ContentHash          string           `json:"content_hash"`
+	TokenCount           pgtype.Int4      `json:"token_count"`
+	ChunkType            pgtype.Text      `json:"chunk_type"`
+	ChunkName            pgtype.Text      `json:"chunk_name"`
+	ParentName           pgtype.Text      `json:"parent_name"`
+	Signature            pgtype.Text      `json:"signature"`
+	DocComment           pgtype.Text      `json:"doc_comment"`
+	Imports              []byte           `json:"imports"`
+	Calls                []byte           `json:"calls"`
+	LinesOfCode          pgtype.Int4      `json:"lines_of_code"`
+	CommentRatio         pgtype.Numeric   `json:"comment_ratio"`
+	CyclomaticComplexity pgtype.Int4      `json:"cyclomatic_complexity"`
+	EmbeddingContext     pgtype.Text      `json:"embedding_context"`
+	SourceSnapshotID     pgtype.UUID      `json:"source_snapshot_id"`
+	GitCommitHash        pgtype.Text      `json:"git_commit_hash"`
+	Author               pgtype.Text      `json:"author"`
+	UpdatedAt            pgtype.Timestamp `json:"updated_at"`
+	IndexedAt            pgtype.Timestamp `json:"indexed_at"`
+	FileVersion          pgtype.Text      `json:"file_version"`
+	IsLatest             bool             `json:"is_latest"`
+	ChunkKey             string           `json:"chunk_key"`
 }
 
 type CreateEmbeddingBatchParams struct {

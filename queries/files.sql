@@ -1,6 +1,6 @@
 -- name: CreateFile :one
-INSERT INTO files (snapshot_id, path, size, content_type, content_hash)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO files (snapshot_id, path, size, content_type, content_hash, language, domain)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetFile :one
