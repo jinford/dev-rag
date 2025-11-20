@@ -123,6 +123,49 @@ func (q *Queries) FindFilesByContentHash(ctx context.Context, contentHash string
 	return items, nil
 }
 
+const getDomainCoverageBySnapshot = `-- name: GetDomainCoverageBySnapshot :many
+SELECT
+    COALESCE(f.domain, 'unknown') AS domain,
+    COUNT(DISTINCT f.id) AS file_count,
+    COALESCE(SUM(chunk_counts.chunk_count), 0) AS chunk_count
+FROM files f
+LEFT JOIN (
+    SELECT file_id, COUNT(*) AS chunk_count
+    FROM chunks
+    GROUP BY file_id
+) chunk_counts ON f.id = chunk_counts.file_id
+WHERE f.snapshot_id = $1
+GROUP BY f.domain
+ORDER BY file_count DESC
+`
+
+type GetDomainCoverageBySnapshotRow struct {
+	Domain     string      `json:"domain"`
+	FileCount  int64       `json:"file_count"`
+	ChunkCount interface{} `json:"chunk_count"`
+}
+
+// ドメイン別のファイル数とチャンク数を集計
+func (q *Queries) GetDomainCoverageBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageBySnapshotRow, error) {
+	rows, err := q.db.Query(ctx, getDomainCoverageBySnapshot, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetDomainCoverageBySnapshotRow{}
+	for rows.Next() {
+		var i GetDomainCoverageBySnapshotRow
+		if err := rows.Scan(&i.Domain, &i.FileCount, &i.ChunkCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFile = `-- name: GetFile :one
 SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
 WHERE id = $1
@@ -193,6 +236,48 @@ func (q *Queries) GetFileHashesBySnapshot(ctx context.Context, snapshotID pgtype
 	for rows.Next() {
 		var i GetFileHashesBySnapshotRow
 		if err := rows.Scan(&i.Path, &i.ContentHash); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getFilesByDomain = `-- name: GetFilesByDomain :many
+SELECT id, snapshot_id, path, size, content_type, content_hash, language, domain, created_at FROM files
+WHERE snapshot_id = $1 AND domain = $2
+ORDER BY path
+`
+
+type GetFilesByDomainParams struct {
+	SnapshotID pgtype.UUID `json:"snapshot_id"`
+	Domain     pgtype.Text `json:"domain"`
+}
+
+// 指定したドメインのファイル一覧を取得
+func (q *Queries) GetFilesByDomain(ctx context.Context, arg GetFilesByDomainParams) ([]File, error) {
+	rows, err := q.db.Query(ctx, getFilesByDomain, arg.SnapshotID, arg.Domain)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []File{}
+	for rows.Next() {
+		var i File
+		if err := rows.Scan(
+			&i.ID,
+			&i.SnapshotID,
+			&i.Path,
+			&i.Size,
+			&i.ContentType,
+			&i.ContentHash,
+			&i.Language,
+			&i.Domain,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

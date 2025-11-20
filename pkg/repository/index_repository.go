@@ -53,6 +53,10 @@ type ChunkMetadata struct {
 	CyclomaticComplexity *int
 	EmbeddingContext     *string
 
+	// 階層関係と重要度 (Phase 2追加)
+	Level           int
+	ImportanceScore *float64
+
 	// トレーサビリティ・バージョン管理
 	SourceSnapshotID *uuid.UUID
 	GitCommitHash    *string
@@ -167,6 +171,7 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 	// metadataがnilの場合はデフォルト値を使用（後方互換性のため）
 	if metadata == nil {
 		metadata = &ChunkMetadata{
+			Level:    2, // デフォルトは関数/クラスレベル
 			IsLatest: true,
 			ChunkKey: "", // デフォルト値（空文字列）
 		}
@@ -196,6 +201,9 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 		CommentRatio:         Float64PtrToPgNumeric(metadata.CommentRatio),
 		CyclomaticComplexity: IntPtrToPgInt4(metadata.CyclomaticComplexity),
 		EmbeddingContext:     StringPtrToPgtext(metadata.EmbeddingContext),
+		// 階層関係と重要度
+		Level:           int32(metadata.Level),
+		ImportanceScore: Float64PtrToPgNumeric(metadata.ImportanceScore),
 		// トレーサビリティ・バージョン管理
 		SourceSnapshotID: UUIDPtrToPgtype(metadata.SourceSnapshotID),
 		GitCommitHash:    StringPtrToPgtext(metadata.GitCommitHash),
@@ -417,6 +425,19 @@ func convertSQLCFile(row sqlc.File) *models.File {
 	}
 }
 
+func convertSQLCSnapshotFile(row sqlc.SnapshotFile) *models.SnapshotFile {
+	return &models.SnapshotFile{
+		ID:         PgtypeToUUID(row.ID),
+		SnapshotID: PgtypeToUUID(row.SnapshotID),
+		FilePath:   row.FilePath,
+		FileSize:   row.FileSize,
+		Domain:     PgtextToStringPtr(row.Domain),
+		Indexed:    row.Indexed,
+		SkipReason: PgtextToStringPtr(row.SkipReason),
+		CreatedAt:  PgtypeToTime(row.CreatedAt),
+	}
+}
+
 func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 	return &models.Chunk{
 		ID:          PgtypeToUUID(row.ID),
@@ -440,6 +461,9 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		CommentRatio:         PgtypeToFloat64Ptr(row.CommentRatio),
 		CyclomaticComplexity: PgtypeToIntPtr(row.CyclomaticComplexity),
 		EmbeddingContext:     PgtextToStringPtr(row.EmbeddingContext),
+		// 階層関係と重要度 (Phase 2追加)
+		Level:           int(row.Level),
+		ImportanceScore: PgtypeToFloat64Ptr(row.ImportanceScore),
 		// トレーサビリティ・バージョン管理 (Phase 1追加)
 		SourceSnapshotID: PgtypeToUUIDPtr(row.SourceSnapshotID),
 		GitCommitHash:    PgtextToStringPtr(row.GitCommitHash),
@@ -451,4 +475,290 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		// 決定的な識別子 (Phase 1追加)
 		ChunkKey: row.ChunkKey,
 	}
+}
+
+// === Chunk Hierarchy 操作 (Phase 2追加) ===
+
+// AddChunkRelation は親子関係を chunk_hierarchy に追加します
+func (rw *IndexRepositoryRW) AddChunkRelation(ctx context.Context, parentID, childID uuid.UUID, ordinal int) error {
+	if err := rw.q.AddChunkRelation(ctx, sqlc.AddChunkRelationParams{
+		ParentChunkID: UUIDToPgtype(parentID),
+		ChildChunkID:  UUIDToPgtype(childID),
+		Ordinal:       int32(ordinal),
+	}); err != nil {
+		return fmt.Errorf("failed to add chunk relation: %w", err)
+	}
+	return nil
+}
+
+// RemoveChunkRelation は親子関係を chunk_hierarchy から削除します
+func (rw *IndexRepositoryRW) RemoveChunkRelation(ctx context.Context, parentID, childID uuid.UUID) error {
+	if err := rw.q.RemoveChunkRelation(ctx, sqlc.RemoveChunkRelationParams{
+		ParentChunkID: UUIDToPgtype(parentID),
+		ChildChunkID:  UUIDToPgtype(childID),
+	}); err != nil {
+		return fmt.Errorf("failed to remove chunk relation: %w", err)
+	}
+	return nil
+}
+
+// GetChildChunkIDs は子チャンクのIDリストを ordinal 順で取得します
+func (r *IndexRepositoryR) GetChildChunkIDs(ctx context.Context, parentID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.q.GetChildChunkIDs(ctx, UUIDToPgtype(parentID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child chunk IDs: %w", err)
+	}
+
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, PgtypeToUUID(row))
+	}
+
+	return ids, nil
+}
+
+// GetParentChunkID は親チャンクのIDを取得します（親がいない場合は nil）
+func (r *IndexRepositoryR) GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (*uuid.UUID, error) {
+	parentID, err := r.q.GetParentChunkID(ctx, UUIDToPgtype(chunkID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // 親がいない場合
+		}
+		return nil, fmt.Errorf("failed to get parent chunk ID: %w", err)
+	}
+
+	id := PgtypeToUUID(parentID)
+	return &id, nil
+}
+
+// GetChildChunks は子チャンクのリストを ordinal 順で取得します（Chunkエンティティを結合）
+func (r *IndexRepositoryR) GetChildChunks(ctx context.Context, parentID uuid.UUID) ([]*models.Chunk, error) {
+	rows, err := r.q.GetChildChunks(ctx, UUIDToPgtype(parentID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get child chunks: %w", err)
+	}
+
+	chunks := make([]*models.Chunk, 0, len(rows))
+	for _, row := range rows {
+		chunks = append(chunks, convertSQLCChunk(row))
+	}
+
+	return chunks, nil
+}
+
+// GetParentChunk は親チャンクを取得します
+func (r *IndexRepositoryR) GetParentChunk(ctx context.Context, chunkID uuid.UUID) (*models.Chunk, error) {
+	chunk, err := r.q.GetParentChunk(ctx, UUIDToPgtype(chunkID))
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // 親がいない場合
+		}
+		return nil, fmt.Errorf("failed to get parent chunk: %w", err)
+	}
+
+	return convertSQLCChunk(chunk), nil
+}
+
+// GetChunkTree は親→子→孫を再帰的に取得します
+// 再帰CTEはsqlcで扱いにくいため、Go側で複数回クエリして実装
+func (r *IndexRepositoryR) GetChunkTree(ctx context.Context, rootID uuid.UUID, maxDepth int) ([]*models.Chunk, error) {
+	result := make([]*models.Chunk, 0)
+	visited := make(map[uuid.UUID]bool)
+
+	var traverse func(parentID uuid.UUID, depth int) error
+	traverse = func(parentID uuid.UUID, depth int) error {
+		if depth > maxDepth {
+			return nil
+		}
+		if visited[parentID] {
+			return nil // 循環参照を防止
+		}
+		visited[parentID] = true
+
+		// 親チャンクを取得
+		parent, err := r.GetChunkByID(ctx, parentID)
+		if err != nil {
+			return err
+		}
+		result = append(result, parent)
+
+		// 子チャンクを取得
+		children, err := r.GetChildChunks(ctx, parentID)
+		if err != nil {
+			return err
+		}
+
+		// 再帰的に子をたどる
+		for _, child := range children {
+			if err := traverse(child.ID, depth+1); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	if err := traverse(rootID, 1); err != nil {
+		return nil, fmt.Errorf("failed to get chunk tree: %w", err)
+	}
+
+	return result, nil
+}
+
+// === ドメイン統計 (Phase 2追加) ===
+
+// DomainCoverage はドメイン別のカバレッジ統計を表します
+type DomainCoverage struct {
+	Domain     string
+	FileCount  int64
+	ChunkCount int64
+}
+
+// GetDomainCoverageBySnapshot はスナップショット配下のドメイン別統計を取得します
+func (r *IndexRepositoryR) GetDomainCoverageBySnapshot(ctx context.Context, snapshotID uuid.UUID) ([]*DomainCoverage, error) {
+	rows, err := r.q.GetDomainCoverageBySnapshot(ctx, UUIDToPgtype(snapshotID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get domain coverage: %w", err)
+	}
+
+	coverages := make([]*DomainCoverage, 0, len(rows))
+	for _, row := range rows {
+		// ChunkCountは interface{} 型なので型アサーションが必要
+		var chunkCount int64
+		if row.ChunkCount != nil {
+			// PostgreSQLから返ってくるのは int64
+			if val, ok := row.ChunkCount.(int64); ok {
+				chunkCount = val
+			}
+		}
+
+		coverages = append(coverages, &DomainCoverage{
+			Domain:     row.Domain,
+			FileCount:  row.FileCount,
+			ChunkCount: chunkCount,
+		})
+	}
+
+	return coverages, nil
+}
+
+// GetFilesByDomain は指定したドメインのファイル一覧を取得します
+func (r *IndexRepositoryR) GetFilesByDomain(ctx context.Context, snapshotID uuid.UUID, domain string) ([]*models.File, error) {
+	rows, err := r.q.GetFilesByDomain(ctx, sqlc.GetFilesByDomainParams{
+		SnapshotID: UUIDToPgtype(snapshotID),
+		Domain:     StringToNullableText(domain),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get files by domain: %w", err)
+	}
+
+	files := make([]*models.File, 0, len(rows))
+	for _, row := range rows {
+		files = append(files, convertSQLCFile(row))
+	}
+
+	return files, nil
+}
+
+// === SnapshotFile 操作（Phase 2タスク7: カバレッジマップ構築） ===
+
+// CreateSnapshotFile はスナップショットファイルレコードを作成します
+func (rw *IndexRepositoryRW) CreateSnapshotFile(ctx context.Context, snapshotID uuid.UUID, filePath string, fileSize int64, domain *string, indexed bool, skipReason *string) (*models.SnapshotFile, error) {
+	sf, err := rw.q.CreateSnapshotFile(ctx, sqlc.CreateSnapshotFileParams{
+		SnapshotID: UUIDToPgtype(snapshotID),
+		FilePath:   filePath,
+		FileSize:   fileSize,
+		Domain:     StringPtrToPgtext(domain),
+		Indexed:    indexed,
+		SkipReason: StringPtrToPgtext(skipReason),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create snapshot file: %w", err)
+	}
+
+	return convertSQLCSnapshotFile(sf), nil
+}
+
+// UpdateSnapshotFileIndexed はスナップショットファイルのインデックス済みフラグを更新します
+func (rw *IndexRepositoryRW) UpdateSnapshotFileIndexed(ctx context.Context, snapshotID uuid.UUID, filePath string, indexed bool) error {
+	err := rw.q.UpdateSnapshotFileIndexed(ctx, sqlc.UpdateSnapshotFileIndexedParams{
+		SnapshotID: UUIDToPgtype(snapshotID),
+		FilePath:   filePath,
+		Indexed:    indexed,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update snapshot file indexed status: %w", err)
+	}
+	return nil
+}
+
+// GetSnapshotFilesBySnapshot はスナップショット配下の全ファイルリストを取得します
+func (r *IndexRepositoryR) GetSnapshotFilesBySnapshot(ctx context.Context, snapshotID uuid.UUID) ([]*models.SnapshotFile, error) {
+	rows, err := r.q.GetSnapshotFilesBySnapshot(ctx, UUIDToPgtype(snapshotID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get snapshot files: %w", err)
+	}
+
+	files := make([]*models.SnapshotFile, 0, len(rows))
+	for _, row := range rows {
+		files = append(files, convertSQLCSnapshotFile(row))
+	}
+
+	return files, nil
+}
+
+// GetDomainCoverageStats はドメイン別のカバレッジ統計を取得します
+func (r *IndexRepositoryR) GetDomainCoverageStats(ctx context.Context, snapshotID uuid.UUID) ([]models.DomainCoverage, error) {
+	rows, err := r.q.GetDomainCoverageStats(ctx, UUIDToPgtype(snapshotID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get domain coverage stats: %w", err)
+	}
+
+	coverages := make([]models.DomainCoverage, 0, len(rows))
+	for _, row := range rows {
+		coverages = append(coverages, models.DomainCoverage{
+			Domain:           row.Domain,
+			TotalFiles:       int(row.TotalFiles),
+			IndexedFiles:     int(row.IndexedFiles),
+			IndexedChunks:    int(row.IndexedChunks),
+			CoverageRate:     PgnumericToFloat64(row.CoverageRate),
+			AvgCommentRatio:  PgnumericToFloat64(row.AvgCommentRatio),
+			AvgComplexity:    PgnumericToFloat64(row.AvgComplexity),
+		})
+	}
+
+	return coverages, nil
+}
+
+// GetUnindexedImportantFiles は未インデックスの重要ファイルを検出します
+func (r *IndexRepositoryR) GetUnindexedImportantFiles(ctx context.Context, snapshotID uuid.UUID) ([]string, error) {
+	files, err := r.q.GetUnindexedImportantFiles(ctx, UUIDToPgtype(snapshotID))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get unindexed important files: %w", err)
+	}
+	return files, nil
+}
+
+// === 重要度スコア操作（Phase 2タスク5） ===
+
+// UpdateChunkImportanceScore はチャンクの重要度スコアを更新します
+func (rw *IndexRepositoryRW) UpdateChunkImportanceScore(ctx context.Context, chunkID uuid.UUID, score float64) error {
+	err := rw.q.UpdateChunkImportanceScore(ctx, sqlc.UpdateChunkImportanceScoreParams{
+		ID:              UUIDToPgtype(chunkID),
+		ImportanceScore: Float64ToNullableNumeric(score),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update chunk importance score: %w", err)
+	}
+	return nil
+}
+
+// BatchUpdateChunkImportanceScores はチャンクの重要度スコアを一括更新します
+func (rw *IndexRepositoryRW) BatchUpdateChunkImportanceScores(ctx context.Context, scores map[uuid.UUID]float64) error {
+	for chunkID, score := range scores {
+		if err := rw.UpdateChunkImportanceScore(ctx, chunkID, score); err != nil {
+			return err
+		}
+	}
+	return nil
 }

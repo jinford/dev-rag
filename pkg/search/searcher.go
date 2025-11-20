@@ -40,13 +40,20 @@ type Result struct {
 	Duration time.Duration
 }
 
+// HierarchicalResult は階層情報を含む検索結果と処理時間をまとめます
+type HierarchicalResult struct {
+	Chunks   []*HierarchicalSearchResult
+	Duration time.Duration
+}
+
 type searchExecutor func(ctx context.Context, vector []float32, limit int, filters repository.SearchFilter) ([]*models.SearchResult, error)
 
 // Searcher はベクトル検索を実行します
 type Searcher struct {
-	indexRepo *repository.IndexRepositoryR
-	embedder  *embedder.Embedder
-	logger    *slog.Logger
+	indexRepo            *repository.IndexRepositoryR
+	embedder             *embedder.Embedder
+	hierarchicalSearcher *HierarchicalSearcher
+	logger               *slog.Logger
 }
 
 // NewSearcher は検索用の構造体を生成します
@@ -59,10 +66,14 @@ func NewSearcher(database *db.DB, emb *embedder.Embedder) *Searcher {
 	}
 
 	queries := sqlc.New(database.Pool)
+	indexRepo := repository.NewIndexRepositoryR(queries)
+	logger := slog.Default()
+
 	return &Searcher{
-		indexRepo: repository.NewIndexRepositoryR(queries),
-		embedder:  emb,
-		logger:    slog.Default(),
+		indexRepo:            indexRepo,
+		embedder:             emb,
+		hierarchicalSearcher: NewHierarchicalSearcher(indexRepo, logger),
+		logger:               logger,
 	}
 }
 
@@ -70,6 +81,7 @@ func NewSearcher(database *db.DB, emb *embedder.Embedder) *Searcher {
 func (s *Searcher) SetLogger(logger *slog.Logger) {
 	if logger != nil {
 		s.logger = logger
+		s.hierarchicalSearcher.logger = logger
 	}
 }
 
@@ -224,4 +236,54 @@ func normalizeOptionalString(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+// SearchByProductWithHierarchy はプロダクト単位でベクトル検索を実行し、階層情報を含めます
+func (s *Searcher) SearchByProductWithHierarchy(ctx context.Context, params SearchParams, options HierarchicalSearchOptions) (*HierarchicalResult, error) {
+	// 通常の検索を実行
+	result, err := s.SearchByProduct(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+
+	// 階層情報を追加
+	enriched, err := s.hierarchicalSearcher.EnrichWithHierarchy(ctx, result.Chunks, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to enrich with hierarchy: %w", err)
+	}
+
+	return &HierarchicalResult{
+		Chunks:   enriched,
+		Duration: result.Duration + time.Since(start),
+	}, nil
+}
+
+// SearchBySourceWithHierarchy はソース単位でベクトル検索を実行し、階層情報を含めます
+func (s *Searcher) SearchBySourceWithHierarchy(ctx context.Context, params SearchParams, options HierarchicalSearchOptions) (*HierarchicalResult, error) {
+	// 通常の検索を実行
+	result, err := s.SearchBySource(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+
+	start := time.Now()
+
+	// 階層情報を追加
+	enriched, err := s.hierarchicalSearcher.EnrichWithHierarchy(ctx, result.Chunks, options)
+	if err != nil {
+		return nil, fmt.Errorf("failed to enrich with hierarchy: %w", err)
+	}
+
+	return &HierarchicalResult{
+		Chunks:   enriched,
+		Duration: result.Duration + time.Since(start),
+	}, nil
+}
+
+// GetHierarchicalSearcher は HierarchicalSearcher のインスタンスを返します
+// 直接階層検索機能にアクセスしたい場合に使用します
+func (s *Searcher) GetHierarchicalSearcher() *HierarchicalSearcher {
+	return s.hierarchicalSearcher
 }

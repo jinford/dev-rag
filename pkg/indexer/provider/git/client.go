@@ -416,3 +416,119 @@ func (c *GitClient) CloneOrPull(ctx context.Context, url, destDir, ref string) e
 	// 既存リポジトリの場合はpullを実行
 	return c.Pull(ctx, destDir, ref)
 }
+
+// FileEditFrequency はファイルの編集頻度情報を表します
+type FileEditFrequency struct {
+	FilePath   string
+	EditCount  int       // 指定期間内の編集回数
+	LastEdited time.Time // 最終編集日時
+}
+
+// GetFileEditFrequencies は指定期間内のファイル編集頻度を取得します
+// since: 集計開始日時（例: 過去90日 = time.Now().AddDate(0, 0, -90)）
+// ref: 対象ブランチ/タグ/コミット
+func (c *GitClient) GetFileEditFrequencies(ctx context.Context, repoPath, ref string, since time.Time) (map[string]*FileEditFrequency, error) {
+	repo, err := git.PlainOpen(repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open repository: %w", err)
+	}
+
+	// refを解決
+	hash, err := c.resolveRef(repo, ref)
+	if err != nil {
+		return nil, err
+	}
+
+	// コミット履歴を取得（指定されたrefから）
+	commitIter, err := repo.Log(&git.LogOptions{
+		From:  hash,
+		Since: &since,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get commit log: %w", err)
+	}
+	defer commitIter.Close()
+
+	// ファイルパス→編集頻度情報のマップ
+	editFrequencies := make(map[string]*FileEditFrequency)
+
+	// コミット履歴を遡り、各ファイルの編集回数をカウント
+	err = commitIter.ForEach(func(commit *object.Commit) error {
+		// 親コミットを取得（変更差分を計算するため）
+		parents := commit.Parents()
+		defer parents.Close()
+
+		parent, err := parents.Next()
+		if err != nil {
+			// 親がいない場合（初回コミット）はこのコミットのすべてのファイルをカウント
+			tree, err := commit.Tree()
+			if err != nil {
+				return fmt.Errorf("failed to get tree for commit %s: %w", commit.Hash, err)
+			}
+
+			return tree.Files().ForEach(func(f *object.File) error {
+				if freq, exists := editFrequencies[f.Name]; exists {
+					freq.EditCount++
+					if commit.Author.When.After(freq.LastEdited) {
+						freq.LastEdited = commit.Author.When
+					}
+				} else {
+					editFrequencies[f.Name] = &FileEditFrequency{
+						FilePath:   f.Name,
+						EditCount:  1,
+						LastEdited: commit.Author.When,
+					}
+				}
+				return nil
+			})
+		}
+
+		// 親コミットとの差分を取得
+		parentTree, err := parent.Tree()
+		if err != nil {
+			return fmt.Errorf("failed to get parent tree: %w", err)
+		}
+
+		currentTree, err := commit.Tree()
+		if err != nil {
+			return fmt.Errorf("failed to get current tree: %w", err)
+		}
+
+		changes, err := parentTree.Diff(currentTree)
+		if err != nil {
+			return fmt.Errorf("failed to diff trees: %w", err)
+		}
+
+		// 変更されたファイルをカウント
+		for _, change := range changes {
+			var filePath string
+			if change.To.Name != "" {
+				filePath = change.To.Name
+			} else if change.From.Name != "" {
+				filePath = change.From.Name
+			} else {
+				continue
+			}
+
+			if freq, exists := editFrequencies[filePath]; exists {
+				freq.EditCount++
+				if commit.Author.When.After(freq.LastEdited) {
+					freq.LastEdited = commit.Author.When
+				}
+			} else {
+				editFrequencies[filePath] = &FileEditFrequency{
+					FilePath:   filePath,
+					EditCount:  1,
+					LastEdited: commit.Author.When,
+				}
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to iterate commits: %w", err)
+	}
+
+	return editFrequencies, nil
+}

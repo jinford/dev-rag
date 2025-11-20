@@ -42,3 +42,25 @@ WHERE id = $1;
 -- name: DeleteFilesBySnapshot :exec
 DELETE FROM files
 WHERE snapshot_id = $1;
+
+-- name: GetDomainCoverageBySnapshot :many
+-- ドメイン別のファイル数とチャンク数を集計
+SELECT
+    COALESCE(f.domain, 'unknown') AS domain,
+    COUNT(DISTINCT f.id) AS file_count,
+    COALESCE(SUM(chunk_counts.chunk_count), 0) AS chunk_count
+FROM files f
+LEFT JOIN (
+    SELECT file_id, COUNT(*) AS chunk_count
+    FROM chunks
+    GROUP BY file_id
+) chunk_counts ON f.id = chunk_counts.file_id
+WHERE f.snapshot_id = $1
+GROUP BY f.domain
+ORDER BY file_count DESC;
+
+-- name: GetFilesByDomain :many
+-- 指定したドメインのファイル一覧を取得
+SELECT * FROM files
+WHERE snapshot_id = $1 AND domain = $2
+ORDER BY path;

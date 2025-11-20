@@ -26,6 +26,14 @@ func StringPtrToPgtext(s *string) pgtype.Text {
 	return pgtype.Text{String: *s, Valid: true}
 }
 
+// StringToNullableText converts string to pgtype.Text (nullable)
+func StringToNullableText(s string) pgtype.Text {
+	if s == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
+}
+
 // PgtextToStringPtr converts pgtype.Text to *string
 func PgtextToStringPtr(t pgtype.Text) *string {
 	if !t.Valid {
@@ -181,4 +189,20 @@ func StringSliceFromJSONB(b []byte) []string {
 	var s []string
 	_ = json.Unmarshal(b, &s)
 	return s
+}
+
+// PgnumericToFloat64 converts pgtype.Numeric to float64
+func PgnumericToFloat64(n pgtype.Numeric) float64 {
+	if !n.Valid {
+		return 0.0
+	}
+	f, _ := n.Float64Value()
+	return f.Float64
+}
+
+// Float64ToNullableNumeric converts float64 to pgtype.Numeric (nullable)
+func Float64ToNullableNumeric(f float64) pgtype.Numeric {
+	var num pgtype.Numeric
+	_ = num.Scan(f)
+	return num
 }

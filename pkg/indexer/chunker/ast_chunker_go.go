@@ -69,10 +69,18 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 
 	lines := strings.Split(content, "\n")
 
+	// ファイルサマリーチャンクを生成 (Level 1)
+	summaryChunk := ac.generateFileSummaryChunk(file, content, chunker)
+	if summaryChunk != nil {
+		summaryChunk.Metadata.Level = 1 // レベル1: ファイルサマリー
+		result.Chunks = append(result.Chunks, summaryChunk)
+	}
+
 	// パッケージレベルのコメントを抽出
 	if file.Doc != nil {
 		pkgChunk := ac.extractPackageDoc(file, lines, chunker)
 		if pkgChunk != nil {
+			pkgChunk.Metadata.Level = 2 // レベル2: 関数/クラス単位
 			result.Chunks = append(result.Chunks, pkgChunk)
 		}
 	}
@@ -84,13 +92,19 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			// 関数・メソッドを抽出
-			chunk, excluded := ac.extractFunctionWithMetrics(d, file, lines, imports, chunker)
-			if chunk != nil {
-				result.Chunks = append(result.Chunks, chunk)
-				// 循環的複雑度を記録
-				if chunk.Metadata != nil && chunk.Metadata.CyclomaticComplexity != nil {
-					result.CyclomaticComplexities = append(result.CyclomaticComplexities, *chunk.Metadata.CyclomaticComplexity)
+			// 関数・メソッドを抽出（ロジック分割を含む）
+			chunks, excluded := ac.extractFunctionWithLogicSplitting(d, file, lines, imports, chunker)
+			if chunks != nil {
+				for _, chunk := range chunks {
+					// レベル設定（関数チャンクはレベル2、ロジックチャンクはレベル3）
+					if chunk.Metadata.Level == 0 {
+						chunk.Metadata.Level = 2 // デフォルトはレベル2
+					}
+					result.Chunks = append(result.Chunks, chunk)
+					// 循環的複雑度を記録（関数チャンクのみ）
+					if chunk.Metadata != nil && chunk.Metadata.CyclomaticComplexity != nil && chunk.Metadata.Level == 2 {
+						result.CyclomaticComplexities = append(result.CyclomaticComplexities, *chunk.Metadata.CyclomaticComplexity)
+					}
 				}
 			}
 			if excluded {
@@ -99,12 +113,49 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 		case *ast.GenDecl:
 			// 型定義、変数、定数を抽出
 			declChunks, excludedCount := ac.extractGenDeclWithMetrics(d, file, lines, imports, chunker)
+			for _, chunk := range declChunks {
+				chunk.Metadata.Level = 2 // レベル2: 関数/クラス単位
+			}
 			result.Chunks = append(result.Chunks, declChunks...)
 			result.HighCommentRatioExcluded += excludedCount
 		}
 	}
 
 	return result
+}
+
+// generateFileSummaryChunk はファイル全体のサマリーチャンクを生成します (Level 1)
+func (ac *ASTChunkerGo) generateFileSummaryChunk(file *ast.File, content string, chunker *Chunker) *ChunkWithMetadata {
+	summarizer := NewFileSummarizer()
+	summaryText, err := summarizer.GenerateSummary(content, "go", chunker)
+	if err != nil {
+		return nil
+	}
+
+	tokens := chunker.countTokens(summaryText)
+
+	// サマリーが400トークン以内であることを確認
+	if tokens > 400 {
+		summaryText = chunker.TrimToTokenLimit(summaryText, 400)
+		tokens = 400
+	}
+
+	fileType := "file_summary"
+	fileName := file.Name.Name
+
+	return &ChunkWithMetadata{
+		Chunk: &Chunk{
+			Content:   summaryText,
+			StartLine: 1,
+			EndLine:   len(strings.Split(content, "\n")),
+			Tokens:    tokens,
+		},
+		Metadata: &repository.ChunkMetadata{
+			Type:  &fileType,
+			Name:  &fileName,
+			Level: 1, // レベル1: ファイルサマリー
+		},
+	}
 }
 
 // extractPackageDoc はパッケージレベルのコメントを抽出します
@@ -160,6 +211,7 @@ func (ac *ASTChunkerGo) extractFunction(fn *ast.FuncDecl, file *ast.File, lines 
 }
 
 // extractFunctionWithMetrics は関数・メソッドを抽出し、除外されたかどうかを返します
+// 大きな関数の場合はロジック単位に分割します (Phase 2タスク3)
 func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunker *Chunker) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(fn.Pos())
 	endPos := ac.fset.Position(fn.End())
@@ -231,6 +283,47 @@ func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.F
 			CyclomaticComplexity: &complexity,
 		},
 	}, false // 除外されていない
+}
+
+// extractFunctionWithLogicSplitting は関数を抽出し、必要に応じてロジック単位に分割します
+// Phase 2タスク3: レベル3ロジック単位チャンキング
+func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunker *Chunker) ([]*ChunkWithMetadata, bool) {
+	// まず通常の関数チャンクを生成
+	funcChunk, excluded := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunker)
+	if funcChunk == nil {
+		return nil, excluded
+	}
+
+	chunks := []*ChunkWithMetadata{funcChunk}
+
+	// ロジック分割が必要かチェック
+	logicChunker := NewLogicChunker(ac.fset)
+	config := DefaultSplitConfig()
+
+	complexity := 0
+	if funcChunk.Metadata.CyclomaticComplexity != nil {
+		complexity = *funcChunk.Metadata.CyclomaticComplexity
+	}
+
+	if !logicChunker.ShouldSplit(fn, complexity, config) {
+		// 分割不要の場合は関数チャンクのみを返す
+		return chunks, excluded
+	}
+
+	// ロジック単位に分割
+	logicBlocks := logicChunker.SplitIntoLogicBlocks(fn, lines, config)
+	if len(logicBlocks) == 0 {
+		// ブロックが見つからない場合は関数チャンクのみを返す
+		return chunks, excluded
+	}
+
+	// 孫チャンクを生成
+	logicChunks := logicChunker.GenerateLogicChunks(fn, funcChunk.Metadata, lines, logicBlocks, chunker, config)
+
+	// 孫チャンクを追加
+	chunks = append(chunks, logicChunks...)
+
+	return chunks, excluded
 }
 
 // extractGenDecl は型定義、変数、定数を抽出します（後方互換性のため）

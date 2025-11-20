@@ -143,6 +143,8 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 		processedFiles:    preparedDocs.processedFiles,
 		totalChunks:       preparedDocs.totalChunks,
 		startTime:         startTime,
+		allDocuments:      preparedDocs.allDocuments,  // Phase 2タスク7: 全ドキュメントを渡す
+		sourceProvider:    prov,                       // Phase 2タスク7: プロバイダーを渡す
 	})
 	if err != nil {
 		return nil, err
@@ -167,6 +169,7 @@ type preparedDocumentsResult struct {
 	processedFiles  int
 	totalChunks     int
 	currentDocPaths map[string]bool
+	allDocuments    []*provider.SourceDocument // Phase 2タスク7: 全ドキュメント（カバレッジ計算用）
 }
 
 type preparedFile struct {
@@ -211,6 +214,8 @@ type commitPreparedDocumentParams struct {
 	processedFiles    int
 	totalChunks       int
 	startTime         time.Time
+	allDocuments      []*provider.SourceDocument // Phase 2タスク7: 全ドキュメント（カバレッジ計算用）
+	sourceProvider    provider.SourceProvider    // Phase 2タスク7: プロバイダー（除外判定用）
 }
 
 // loadPreviousSnapshot は差分判定用に最新インデックス済みスナップショットとファイルハッシュを読み出します
@@ -267,13 +272,14 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 	prepared := &preparedDocumentsResult{
 		files:           make([]*preparedFile, 0, len(documents)),
 		currentDocPaths: make(map[string]bool, len(documents)),
+		allDocuments:    documents, // Phase 2タスク7: 全ドキュメントを保持（カバレッジ計算用）
 	}
 
 	for _, doc := range documents {
 		// 取得できたドキュメントのパスを記録
 		prepared.currentDocPaths[doc.Path] = true
 
-		// 除外設定に合致すればスキップ
+		// 除外設定に合致すればスキップ（カバレッジ計算では記録）
 		if prov.ShouldIgnore(doc) {
 			idx.logger.Debug("Skipping ignored document", "path", doc.Path)
 			continue
@@ -630,6 +636,33 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			idx.logger.Info("Deleting documents", "count", len(params.deletedPaths))
 			if err := adapters.Index.DeleteFilesByPaths(ctx, params.previousSnapshot.ID, params.deletedPaths); err != nil {
 				return nil, fmt.Errorf("failed to delete files: %w", err)
+			}
+		}
+
+		// Phase 2タスク7: 全ドキュメントをsnapshot_filesに記録（カバレッジ計算用）
+		processedFilesPaths := make(map[string]bool)
+		for _, file := range params.preparedFiles {
+			processedFilesPaths[file.Path] = true
+		}
+
+		for _, doc := range params.allDocuments {
+			// ドメイン分類を実行
+			domain := idx.classifyDomain(doc.Path)
+
+			// 除外判定
+			isIgnored := params.sourceProvider.ShouldIgnore(doc)
+			var skipReason *string
+			if isIgnored {
+				reason := "ignored by filter"
+				skipReason = &reason
+			}
+
+			// インデックス済みかどうか判定
+			indexed := processedFilesPaths[doc.Path]
+
+			// snapshot_filesに記録
+			if _, err := adapters.Index.CreateSnapshotFile(ctx, snapshot.ID, doc.Path, doc.Size, domain, indexed, skipReason); err != nil {
+				return nil, fmt.Errorf("failed to create snapshot file %s: %w", doc.Path, err)
 			}
 		}
 

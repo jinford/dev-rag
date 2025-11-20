@@ -11,6 +11,8 @@ import (
 )
 
 type Querier interface {
+	AddChunkRelation(ctx context.Context, arg AddChunkRelationParams) error
+	CountChildChunks(ctx context.Context, parentChunkID pgtype.UUID) (int64, error)
 	CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk, error)
 	CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error)
 	CreateEmbedding(ctx context.Context, arg CreateEmbeddingParams) (Embedding, error)
@@ -18,11 +20,15 @@ type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateGitRef(ctx context.Context, arg CreateGitRefParams) (GitRef, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
+	// Phase 2タスク7: カバレッジマップ構築 - snapshot_files操作
+	CreateSnapshotFile(ctx context.Context, arg CreateSnapshotFileParams) (SnapshotFile, error)
 	CreateSource(ctx context.Context, arg CreateSourceParams) (Source, error)
 	CreateSourceIfNotExists(ctx context.Context, arg CreateSourceIfNotExistsParams) (Source, error)
 	CreateSourceSnapshot(ctx context.Context, arg CreateSourceSnapshotParams) (SourceSnapshot, error)
 	CreateWikiMetadata(ctx context.Context, arg CreateWikiMetadataParams) (WikiMetadatum, error)
 	DeleteChunk(ctx context.Context, id pgtype.UUID) error
+	DeleteChunkHierarchyByChild(ctx context.Context, childChunkID pgtype.UUID) error
+	DeleteChunkHierarchyByParent(ctx context.Context, parentChunkID pgtype.UUID) error
 	DeleteChunksByFile(ctx context.Context, fileID pgtype.UUID) error
 	DeleteEmbedding(ctx context.Context, chunkID pgtype.UUID) error
 	DeleteFile(ctx context.Context, id pgtype.UUID) error
@@ -35,22 +41,35 @@ type Querier interface {
 	DeleteWikiMetadata(ctx context.Context, id pgtype.UUID) error
 	FindChunksByContentHash(ctx context.Context, contentHash string) ([]Chunk, error)
 	FindFilesByContentHash(ctx context.Context, contentHash string) ([]File, error)
+	GetChildChunkIDs(ctx context.Context, parentChunkID pgtype.UUID) ([]pgtype.UUID, error)
+	GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error)
 	GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error)
+	// ドメイン別のファイル数とチャンク数を集計
+	GetDomainCoverageBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageBySnapshotRow, error)
+	GetDomainCoverageStats(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageStatsRow, error)
 	GetEmbedding(ctx context.Context, chunkID pgtype.UUID) (Embedding, error)
 	GetFile(ctx context.Context, id pgtype.UUID) (File, error)
 	GetFileByPath(ctx context.Context, arg GetFileByPathParams) (File, error)
 	GetFileHashesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetFileHashesBySnapshotRow, error)
+	// 指定したドメインのファイル一覧を取得
+	GetFilesByDomain(ctx context.Context, arg GetFilesByDomainParams) ([]File, error)
 	GetGitRef(ctx context.Context, id pgtype.UUID) (GitRef, error)
 	GetGitRefByName(ctx context.Context, arg GetGitRefByNameParams) (GitRef, error)
 	GetLatestIndexedSnapshot(ctx context.Context, sourceID pgtype.UUID) (SourceSnapshot, error)
+	GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) (Chunk, error)
+	GetParentChunkID(ctx context.Context, childChunkID pgtype.UUID) (pgtype.UUID, error)
 	GetProduct(ctx context.Context, id pgtype.UUID) (Product, error)
 	GetProductByName(ctx context.Context, name string) (Product, error)
+	GetSnapshotFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]SnapshotFile, error)
 	GetSource(ctx context.Context, id pgtype.UUID) (Source, error)
 	GetSourceByName(ctx context.Context, name string) (Source, error)
 	GetSourceSnapshot(ctx context.Context, id pgtype.UUID) (SourceSnapshot, error)
 	GetSourceSnapshotByVersion(ctx context.Context, arg GetSourceSnapshotByVersionParams) (SourceSnapshot, error)
+	GetUnindexedImportantFiles(ctx context.Context, snapshotID pgtype.UUID) ([]string, error)
 	GetWikiMetadata(ctx context.Context, id pgtype.UUID) (WikiMetadatum, error)
 	GetWikiMetadataByProduct(ctx context.Context, productID pgtype.UUID) (WikiMetadatum, error)
+	HasChildren(ctx context.Context, parentChunkID pgtype.UUID) (bool, error)
+	HasParent(ctx context.Context, childChunkID pgtype.UUID) (bool, error)
 	ListChunksByFile(ctx context.Context, fileID pgtype.UUID) ([]Chunk, error)
 	ListChunksByOrdinalRange(ctx context.Context, arg ListChunksByOrdinalRangeParams) ([]Chunk, error)
 	ListFilesByContentType(ctx context.Context, arg ListFilesByContentTypeParams) ([]File, error)
@@ -64,11 +83,14 @@ type Querier interface {
 	ListSourcesByType(ctx context.Context, sourceType string) ([]Source, error)
 	ListWikiMetadata(ctx context.Context) ([]WikiMetadatum, error)
 	MarkSnapshotIndexed(ctx context.Context, id pgtype.UUID) (SourceSnapshot, error)
+	RemoveChunkRelation(ctx context.Context, arg RemoveChunkRelationParams) error
 	SearchChunksByProduct(ctx context.Context, arg SearchChunksByProductParams) ([]SearchChunksByProductRow, error)
 	SearchChunksBySource(ctx context.Context, arg SearchChunksBySourceParams) ([]SearchChunksBySourceRow, error)
 	SearchSimilarChunks(ctx context.Context, arg SearchSimilarChunksParams) ([]SearchSimilarChunksRow, error)
+	UpdateChunkImportanceScore(ctx context.Context, arg UpdateChunkImportanceScoreParams) error
 	UpdateGitRef(ctx context.Context, arg UpdateGitRefParams) (GitRef, error)
 	UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error)
+	UpdateSnapshotFileIndexed(ctx context.Context, arg UpdateSnapshotFileIndexedParams) error
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) (Source, error)
 }
 

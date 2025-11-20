@@ -49,6 +49,10 @@ type Chunk struct {
 	CyclomaticComplexity pgtype.Int4 `json:"cyclomatic_complexity"`
 	// Embedding生成用の拡張コンテキスト
 	EmbeddingContext pgtype.Text `json:"embedding_context"`
+	// 階層レベル（1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位）
+	Level int32 `json:"level"`
+	// 重要度スコア（0.0000〜1.0000、参照回数・中心性・編集頻度から算出）
+	ImportanceScore pgtype.Numeric `json:"importance_score"`
 	// 所属するスナップショットID（トレーサビリティ用）
 	SourceSnapshotID pgtype.UUID `json:"source_snapshot_id"`
 	// Gitコミットハッシュ（トレーサビリティ用）
@@ -65,6 +69,18 @@ type Chunk struct {
 	IsLatest bool `json:"is_latest"`
 	// 決定的な識別子（{product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}）
 	ChunkKey  string           `json:"chunk_key"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+// チャンクの親子関係を管理する中間テーブル（階層構造の単一の真実源）
+type ChunkHierarchy struct {
+	// 親チャンクのID
+	ParentChunkID pgtype.UUID `json:"parent_chunk_id"`
+	// 子チャンクのID
+	ChildChunkID pgtype.UUID `json:"child_chunk_id"`
+	// 同一親配下での子チャンクの順序（0始まり）
+	Ordinal int32 `json:"ordinal"`
+	// 関係の作成日時
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
@@ -126,6 +142,17 @@ type Product struct {
 	Description pgtype.Text      `json:"description"`
 	CreatedAt   pgtype.Timestamp `json:"created_at"`
 	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+}
+
+type SnapshotFile struct {
+	ID         pgtype.UUID      `json:"id"`
+	SnapshotID pgtype.UUID      `json:"snapshot_id"`
+	FilePath   string           `json:"file_path"`
+	FileSize   int64            `json:"file_size"`
+	Domain     pgtype.Text      `json:"domain"`
+	Indexed    bool             `json:"indexed"`
+	SkipReason pgtype.Text      `json:"skip_reason"`
+	CreatedAt  pgtype.Timestamp `json:"created_at"`
 }
 
 // ドキュメント・コードのソース情報（Git、Confluence、PDFなど）

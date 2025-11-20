@@ -46,6 +46,10 @@ type Chunk struct {
 	CyclomaticComplexity *int     `json:"cyclomaticComplexity,omitempty"`
 	EmbeddingContext     *string  `json:"embeddingContext,omitempty"`
 
+	// 階層関係と重要度 (Phase 2追加)
+	Level           int      `json:"level"`
+	ImportanceScore *float64 `json:"importanceScore,omitempty"`
+
 	// トレーサビリティ・バージョン管理 (Phase 1追加)
 	SourceSnapshotID *uuid.UUID `json:"sourceSnapshotID,omitempty"`
 	GitCommitHash    *string    `json:"gitCommitHash,omitempty"`
@@ -77,4 +81,62 @@ type SearchResult struct {
 	Score       float64   `json:"score"`
 	PrevContent *string   `json:"prevContent,omitempty"`
 	NextContent *string   `json:"nextContent,omitempty"`
+}
+
+// SnapshotFile はスナップショット内の全ファイルリスト（インデックス対象外含む）を表します
+// Phase 2タスク7: カバレッジマップ構築用
+type SnapshotFile struct {
+	ID         uuid.UUID `json:"id"`
+	SnapshotID uuid.UUID `json:"snapshotID"`
+	FilePath   string    `json:"filePath"`
+	FileSize   int64     `json:"fileSize"`
+	Domain     *string   `json:"domain,omitempty"`
+	Indexed    bool      `json:"indexed"`
+	SkipReason *string   `json:"skipReason,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+}
+
+// DomainCoverage はドメイン別のカバレッジ情報を表します
+// Phase 2タスク7: カバレッジマップ構築用
+type DomainCoverage struct {
+	Domain           string  `json:"domain"`
+	TotalFiles       int     `json:"totalFiles"`
+	IndexedFiles     int     `json:"indexedFiles"`
+	IndexedChunks    int     `json:"indexedChunks"`
+	CoverageRate     float64 `json:"coverageRate"`
+	AvgCommentRatio  float64 `json:"avgCommentRatio"`
+	AvgComplexity    float64 `json:"avgComplexity"`
+	UnindexedImportantFiles []string `json:"unindexedImportantFiles,omitempty"`
+}
+
+// CoverageMap はリポジトリ全体のカバレッジマップを表します
+// Phase 2タスク7: カバレッジマップ構築用
+type CoverageMap struct {
+	SnapshotID       string           `json:"snapshotID"`
+	SnapshotVersion  string           `json:"snapshotVersion"`
+	TotalFiles       int              `json:"totalFiles"`
+	TotalIndexedFiles int             `json:"totalIndexedFiles"`
+	TotalChunks      int              `json:"totalChunks"`
+	OverallCoverage  float64          `json:"overallCoverage"`
+	DomainCoverages  []DomainCoverage `json:"domainCoverages"`
+	GeneratedAt      time.Time        `json:"generatedAt"`
+}
+
+// AlertSeverity はアラートの深刻度を表します
+// Phase 2タスク8: カバレッジアラート機能用
+type AlertSeverity string
+
+const (
+	AlertSeverityWarning AlertSeverity = "warning"
+	AlertSeverityError   AlertSeverity = "error"
+)
+
+// Alert はカバレッジに関するアラートを表します
+// Phase 2タスク8: カバレッジアラート機能用
+type Alert struct {
+	Severity    AlertSeverity `json:"severity"`
+	Message     string        `json:"message"`
+	Domain      string        `json:"domain,omitempty"`
+	Details     interface{}   `json:"details,omitempty"`
+	GeneratedAt time.Time     `json:"generatedAt"`
 }

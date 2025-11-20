@@ -137,6 +137,9 @@ CREATE TABLE IF NOT EXISTS chunks (
     comment_ratio NUMERIC(3,2),
     cyclomatic_complexity INTEGER,
     embedding_context TEXT,
+    -- 階層関係と重要度 (Phase 2追加)
+    level INTEGER NOT NULL DEFAULT 2,  -- 1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位
+    importance_score NUMERIC(5,4),     -- 0.0000〜1.0000
     -- トレーサビリティ・バージョン管理 (Phase 1追加)
     source_snapshot_id UUID REFERENCES source_snapshots(id) ON DELETE CASCADE,
     git_commit_hash VARCHAR(40),
@@ -161,6 +164,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_is_latest ON chunks(is_latest);
 CREATE INDEX IF NOT EXISTS idx_chunks_indexed_at ON chunks(indexed_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_updated_at ON chunks(updated_at);
 CREATE INDEX IF NOT EXISTS idx_chunks_chunk_type ON chunks(chunk_type);
+CREATE INDEX IF NOT EXISTS idx_chunks_level ON chunks(level);
+CREATE INDEX IF NOT EXISTS idx_chunks_importance_score ON chunks(importance_score);
 
 COMMENT ON TABLE chunks IS 'ファイルを分割したチャンク';
 COMMENT ON COLUMN chunks.id IS 'チャンクの一意識別子';
@@ -182,6 +187,8 @@ COMMENT ON COLUMN chunks.lines_of_code IS 'コード行数（コメント・空�
 COMMENT ON COLUMN chunks.comment_ratio IS 'コメント比率（0.00〜1.00）';
 COMMENT ON COLUMN chunks.cyclomatic_complexity IS '循環的複雑度（McCabe複雑度）';
 COMMENT ON COLUMN chunks.embedding_context IS 'Embedding生成用の拡張コンテキスト';
+COMMENT ON COLUMN chunks.level IS '階層レベル（1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位）';
+COMMENT ON COLUMN chunks.importance_score IS '重要度スコア（0.0000〜1.0000、参照回数・中心性・編集頻度から算出）';
 COMMENT ON COLUMN chunks.source_snapshot_id IS '所属するスナップショットID（トレーサビリティ用）';
 COMMENT ON COLUMN chunks.git_commit_hash IS 'Gitコミットハッシュ（トレーサビリティ用）';
 COMMENT ON COLUMN chunks.author IS '最終更新者（Git author）';
@@ -210,6 +217,26 @@ COMMENT ON COLUMN embeddings.chunk_id IS 'チャンクID（主キー兼外部キ
 COMMENT ON COLUMN embeddings.vector IS 'Embeddingベクトル（1536次元）';
 COMMENT ON COLUMN embeddings.model IS '使用したEmbeddingモデル名';
 
+-- chunk_hierarchyテーブル（階層関係管理）
+CREATE TABLE IF NOT EXISTS chunk_hierarchy (
+    parent_chunk_id UUID NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    child_chunk_id UUID NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,  -- 子の順序
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (parent_chunk_id, child_chunk_id),
+    CONSTRAINT uq_child_ordinal UNIQUE (parent_chunk_id, ordinal),
+    CONSTRAINT chk_no_self_reference CHECK (parent_chunk_id != child_chunk_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_hierarchy_parent ON chunk_hierarchy(parent_chunk_id);
+CREATE INDEX IF NOT EXISTS idx_hierarchy_child ON chunk_hierarchy(child_chunk_id);
+
+COMMENT ON TABLE chunk_hierarchy IS 'チャンクの親子関係を管理する中間テーブル（階層構造の単一の真実源）';
+COMMENT ON COLUMN chunk_hierarchy.parent_chunk_id IS '親チャンクのID';
+COMMENT ON COLUMN chunk_hierarchy.child_chunk_id IS '子チャンクのID';
+COMMENT ON COLUMN chunk_hierarchy.ordinal IS '同一親配下での子チャンクの順序（0始まり）';
+COMMENT ON COLUMN chunk_hierarchy.created_at IS '関係の作成日時';
+
 -- wiki_metadataテーブル（プロダクト単位のみ）
 CREATE TABLE IF NOT EXISTS wiki_metadata (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -230,3 +257,22 @@ COMMENT ON COLUMN wiki_metadata.product_id IS '対象プロダクトのID';
 COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パス（例: /var/lib/dev-rag/wikis/my-ecommerce/）';
 COMMENT ON COLUMN wiki_metadata.file_count IS '生成されたWikiファイル数';
 COMMENT ON COLUMN wiki_metadata.generated_at IS 'Wiki生成完了日時';
+
+-- Phase 2 タスク7: カバレッジマップ構築のためのsnapshot_filesテーブル
+-- 全ファイルリスト（インデックス対象外含む）を永続化して正確なカバレッジ率を計算可能にする
+CREATE TABLE IF NOT EXISTS snapshot_files (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    snapshot_id UUID NOT NULL REFERENCES source_snapshots(id) ON DELETE CASCADE,
+    file_path VARCHAR(512) NOT NULL,
+    file_size BIGINT NOT NULL,
+    domain VARCHAR(50),          -- ドメイン分類 (code, architecture, ops, tests, infra)
+    indexed BOOLEAN NOT NULL DEFAULT false,  -- インデックス済みか
+    skip_reason VARCHAR(255),    -- インデックスしなかった理由（除外パターン、バイナリファイル等）
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_snapshot_file UNIQUE (snapshot_id, file_path)
+);
+
+-- パフォーマンス向上のためのインデックス
+CREATE INDEX IF NOT EXISTS idx_snapshot_files_snapshot ON snapshot_files(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_snapshot_files_domain ON snapshot_files(domain);
+CREATE INDEX IF NOT EXISTS idx_snapshot_files_indexed ON snapshot_files(indexed);
