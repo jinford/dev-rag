@@ -20,6 +20,7 @@ import (
 	"github.com/jinford/dev-rag/pkg/indexer/detector"
 	embedpkg "github.com/jinford/dev-rag/pkg/indexer/embedder"
 	"github.com/jinford/dev-rag/pkg/indexer/importance"
+	"github.com/jinford/dev-rag/pkg/indexer/llm/prompts"
 	"github.com/jinford/dev-rag/pkg/indexer/provider"
 	gitprovider "github.com/jinford/dev-rag/pkg/indexer/provider/git"
 	"github.com/jinford/dev-rag/pkg/lock"
@@ -30,17 +31,19 @@ import (
 
 // Indexer はソースのインデックス化を管理します
 type Indexer struct {
-	sourceReadRepo *repository.SourceRepositoryR
-	indexReadRepo  *repository.IndexRepositoryR
-	txProvider     *txprovider.TransactionProvider
-	srcProviders   map[models.SourceType]provider.SourceProvider
-	chunker        *chunker.Chunker
-	embedder       *embedpkg.Embedder
-	contextBuilder *embedpkg.ContextBuilder
-	detector       *detector.ContentTypeDetector
-	gitClient      *gitprovider.GitClient // Phase 2タスク5: Git履歴取得用
-	logger         *slog.Logger
-	metrics        *IndexMetrics // Phase 1追加: メトリクス収集
+	sourceReadRepo    *repository.SourceRepositoryR
+	indexReadRepo     *repository.IndexRepositoryR
+	txProvider        *txprovider.TransactionProvider
+	srcProviders      map[models.SourceType]provider.SourceProvider
+	chunker           *chunker.Chunker
+	embedder          *embedpkg.Embedder
+	contextBuilder    *embedpkg.ContextBuilder
+	detector          *detector.ContentTypeDetector
+	gitClient         *gitprovider.GitClient          // Phase 2タスク5: Git履歴取得用
+	domainClassifier  *prompts.DomainClassifier       // Phase 3タスク5: LLMドメイン分類器
+	useLLMClassifier  bool                            // Phase 3タスク5: LLM分類を使用するかのフラグ
+	logger            *slog.Logger
+	metrics           *IndexMetrics // Phase 1追加: メトリクス収集
 }
 
 // NewIndexer は新しいIndexerを作成します
@@ -78,6 +81,13 @@ func NewIndexer(
 // RegisterProvider はソースプロバイダーを登録します
 func (idx *Indexer) RegisterProvider(srcProvider provider.SourceProvider) {
 	idx.srcProviders[srcProvider.GetSourceType()] = srcProvider
+}
+
+// SetDomainClassifier はLLMドメイン分類器を設定します
+// Phase 3タスク5: LLMドメイン分類の統合
+func (idx *Indexer) SetDomainClassifier(classifier *prompts.DomainClassifier) {
+	idx.domainClassifier = classifier
+	idx.useLLMClassifier = true
 }
 
 // IndexResult はインデックス化の結果
@@ -474,7 +484,24 @@ func (idx *Indexer) detectLanguage(path string, content string) *string {
 }
 
 // classifyDomain はファイルパスからドメインを分類します
+// Phase 3タスク5: LLM分類とルールベース分類の統合
 func (idx *Indexer) classifyDomain(path string) *string {
+	// ルールベースドメイン分類を実行
+	ruleBasedDomain := idx.classifyDomainRuleBased(path)
+
+	// LLM分類が無効な場合はルールベース結果をそのまま返す
+	if !idx.useLLMClassifier || idx.domainClassifier == nil {
+		return ruleBasedDomain
+	}
+
+	// LLM分類を実行（ここでは同期的に実行）
+	// 実際の本番環境では非同期・バッチ処理が推奨される
+	domain := idx.classifyDomainWithLLM(path, ruleBasedDomain)
+	return domain
+}
+
+// classifyDomainRuleBased はルールベースでファイルパスからドメインを分類します
+func (idx *Indexer) classifyDomainRuleBased(path string) *string {
 	lowerPath := strings.ToLower(path)
 
 	// テストファイル（優先度高い順にチェック）
@@ -536,6 +563,67 @@ func (idx *Indexer) classifyDomain(path string) *string {
 	// デフォルトはcode
 	domain := "code"
 	return &domain
+}
+
+// classifyDomainWithLLM はLLMを使用してドメインを分類します
+// Phase 3タスク5: LLMドメイン分類の実装
+func (idx *Indexer) classifyDomainWithLLM(path string, ruleBasedDomain *string) *string {
+	// TODO: 実際のファイルコンテンツを読み込む必要がある場合は、
+	// prepareDocumentsの段階でファイル情報を渡す設計に変更する必要がある
+	// ここでは簡易実装としてルールベース結果をフォールバックとして使用
+
+	// 信頼度の閾値
+	const confidenceThreshold = 0.5
+
+	// サンプル行を抽出（ここでは空文字列、実際の実装では実ファイル読み込みが必要）
+	sampleLines := ""
+
+	// ディレクトリヒントを生成
+	directoryHint := prompts.CreateDirectoryHintFromRuleBased(path, ruleBasedDomain)
+
+	// 言語検出
+	detectedLanguage := ""
+	if lang := idx.detectLanguage(path, ""); lang != nil {
+		detectedLanguage = *lang
+	}
+
+	// LLM分類リクエストを構築
+	req := prompts.DomainClassificationRequest{
+		NodePath:         path,
+		NodeType:         "file",
+		DetectedLanguage: detectedLanguage,
+		SampleLines:      sampleLines,
+		DirectoryHints:   directoryHint,
+	}
+
+	// LLM分類を実行
+	ctx := context.Background()
+	resp, err := idx.domainClassifier.Classify(ctx, req)
+	if err != nil {
+		idx.logger.Warn("LLM domain classification failed, falling back to rule-based",
+			"path", path,
+			"error", err)
+		return ruleBasedDomain
+	}
+
+	// 信頼度が低い場合はルールベース結果にフォールバック
+	if resp.Confidence < confidenceThreshold {
+		idx.logger.Debug("LLM classification confidence too low, using rule-based result",
+			"path", path,
+			"llm_domain", resp.Domain,
+			"confidence", resp.Confidence,
+			"rule_based_domain", *ruleBasedDomain)
+		return ruleBasedDomain
+	}
+
+	// LLM分類結果を使用
+	idx.logger.Debug("Using LLM domain classification",
+		"path", path,
+		"domain", resp.Domain,
+		"confidence", resp.Confidence,
+		"rationale", resp.Rationale)
+
+	return &resp.Domain
 }
 
 // persistPreparedChunks は事前計算したチャンク/EmbeddingをDBへ保存します
