@@ -52,7 +52,12 @@ type Chunk struct {
 	// 階層レベル（1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位）
 	Level int32 `json:"level"`
 	// 重要度スコア（0.0000〜1.0000、参照回数・中心性・編集頻度から算出）
-	ImportanceScore pgtype.Numeric `json:"importance_score"`
+	ImportanceScore  pgtype.Numeric `json:"importance_score"`
+	StandardImports  []byte         `json:"standard_imports"`
+	ExternalImports  []byte         `json:"external_imports"`
+	InternalCalls    []byte         `json:"internal_calls"`
+	ExternalCalls    []byte         `json:"external_calls"`
+	TypeDependencies []byte         `json:"type_dependencies"`
 	// 所属するスナップショットID（トレーサビリティ用）
 	SourceSnapshotID pgtype.UUID `json:"source_snapshot_id"`
 	// Gitコミットハッシュ（トレーサビリティ用）
@@ -69,6 +74,20 @@ type Chunk struct {
 	IsLatest bool `json:"is_latest"`
 	// 決定的な識別子（{product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}）
 	ChunkKey  string           `json:"chunk_key"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+// チャンク間の依存関係を管理するテーブル
+type ChunkDependency struct {
+	ID pgtype.UUID `json:"id"`
+	// 依存元のチャンクID
+	FromChunkID pgtype.UUID `json:"from_chunk_id"`
+	// 依存先のチャンクID
+	ToChunkID pgtype.UUID `json:"to_chunk_id"`
+	// 依存関係の種類（call: 関数呼び出し、import: インポート、type: 型依存）
+	DepType string `json:"dep_type"`
+	// 依存の対象シンボル名
+	Symbol    pgtype.Text      `json:"symbol"`
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 

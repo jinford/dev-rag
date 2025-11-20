@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,9 +15,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/jinford/dev-rag/pkg/indexer/chunker"
+	"github.com/jinford/dev-rag/pkg/indexer/coverage"
+	"github.com/jinford/dev-rag/pkg/indexer/dependency"
 	"github.com/jinford/dev-rag/pkg/indexer/detector"
 	embedpkg "github.com/jinford/dev-rag/pkg/indexer/embedder"
+	"github.com/jinford/dev-rag/pkg/indexer/importance"
 	"github.com/jinford/dev-rag/pkg/indexer/provider"
+	gitprovider "github.com/jinford/dev-rag/pkg/indexer/provider/git"
 	"github.com/jinford/dev-rag/pkg/lock"
 	"github.com/jinford/dev-rag/pkg/models"
 	"github.com/jinford/dev-rag/pkg/repository"
@@ -33,6 +38,7 @@ type Indexer struct {
 	embedder       *embedpkg.Embedder
 	contextBuilder *embedpkg.ContextBuilder
 	detector       *detector.ContentTypeDetector
+	gitClient      *gitprovider.GitClient // Phase 2タスク5: Git履歴取得用
 	logger         *slog.Logger
 	metrics        *IndexMetrics // Phase 1追加: メトリクス収集
 }
@@ -45,6 +51,7 @@ func NewIndexer(
 	chunker *chunker.Chunker,
 	embedder *embedpkg.Embedder,
 	detector *detector.ContentTypeDetector,
+	gitClient *gitprovider.GitClient,
 	logger *slog.Logger,
 ) (*Indexer, error) {
 	// ContextBuilderを初期化
@@ -62,6 +69,7 @@ func NewIndexer(
 		embedder:       embedder,
 		contextBuilder: contextBuilder,
 		detector:       detector,
+		gitClient:      gitClient,
 		logger:         logger,
 		metrics:        NewIndexMetrics(), // Phase 1追加: メトリクス初期化
 	}, nil
@@ -149,6 +157,9 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 	if err != nil {
 		return nil, err
 	}
+
+	// Phase 2タスク8: カバレッジアラートを生成・表示
+	idx.generateAndDisplayCoverageAlerts(ctx, result.SnapshotID, versionIdentifier)
 
 	// メトリクスをログ出力
 	idx.logMetrics()
@@ -692,6 +703,12 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			return nil, fmt.Errorf("failed to mark snapshot as indexed: %w", err)
 		}
 
+		// Phase 2タスク5: 重要度スコアを計算・保存
+		if err := idx.calculateAndSaveImportanceScores(ctx, adapters, snapshot.ID, params); err != nil {
+			// エラーが発生してもログに記録するだけで処理は続行
+			idx.logger.Warn("Failed to calculate importance scores", "error", err)
+		}
+
 		// 最終結果を構築
 		duration := time.Since(params.startTime)
 		return &IndexResult{
@@ -702,4 +719,220 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			Duration:          duration,
 		}, nil
 	})
+}
+
+// calculateAndSaveImportanceScores は重要度スコアを計算してDBに保存します (Phase 2タスク5)
+func (idx *Indexer) calculateAndSaveImportanceScores(ctx context.Context, adapters *txprovider.Adapter, snapshotID uuid.UUID, params *commitPreparedDocumentParams) error {
+	// Gitプロバイダーでない場合はスキップ
+	if params.sourceProvider.GetSourceType() != models.SourceTypeGit {
+		idx.logger.Debug("Skipping importance score calculation for non-Git source")
+		return nil
+	}
+
+	// GitClientが設定されていない場合はスキップ
+	if idx.gitClient == nil {
+		idx.logger.Debug("GitClient is not configured, skipping importance score calculation")
+		return nil
+	}
+
+	// ソースのメタデータからリポジトリパスを取得
+	sourceMetadata := params.source.Metadata
+	if sourceMetadata == nil {
+		idx.logger.Debug("Source metadata is nil, skipping importance score calculation")
+		return nil
+	}
+
+	// メタデータからローカルパスを取得（Git providerが設定するlocalPath）
+	localPathInterface, ok := sourceMetadata["localPath"]
+	if !ok {
+		idx.logger.Debug("localPath not found in source metadata, skipping importance score calculation")
+		return nil
+	}
+
+	repoPath, ok := localPathInterface.(string)
+	if !ok || repoPath == "" {
+		idx.logger.Debug("localPath is not a valid string, skipping importance score calculation")
+		return nil
+	}
+
+	// 1. スナップショット配下の全チャンクを取得
+	files, err := adapters.Index.ListFilesBySnapshot(ctx, snapshotID)
+	if err != nil {
+		return fmt.Errorf("failed to list files by snapshot: %w", err)
+	}
+
+	if len(files) == 0 {
+		idx.logger.Debug("No files found for snapshot, skipping importance score calculation")
+		return nil
+	}
+
+	// 2. 依存グラフを構築
+	graph := dependency.NewGraph()
+
+	// チャンクIDからファイルパスへのマッピング
+	chunkIDToFilePath := make(map[uuid.UUID]string)
+
+	for _, file := range files {
+		chunks, err := adapters.Index.ListChunksByFile(ctx, file.ID)
+		if err != nil {
+			idx.logger.Warn("Failed to list chunks for file", "fileID", file.ID, "error", err)
+			continue
+		}
+
+		for _, chunk := range chunks {
+			// グラフにノードを追加
+			node := &dependency.Node{
+				ChunkID:  chunk.ID,
+				Name:     stringPtrOrEmpty(chunk.Name),
+				Type:     stringPtrOrEmpty(chunk.Type),
+				FilePath: file.Path,
+			}
+			graph.AddNode(node)
+			chunkIDToFilePath[chunk.ID] = file.Path
+
+			// 依存関係（エッジ）を追加
+			// 関数呼び出しからエッジを生成
+			for _, call := range chunk.Calls {
+				// 呼び出し先のチャンクを探す（名前ベースで簡易的にマッチング）
+				targetChunkID := idx.findChunkIDByName(chunks, call)
+				if targetChunkID != nil {
+					edge := &dependency.Edge{
+						From:         chunk.ID,
+						To:           *targetChunkID,
+						RelationType: dependency.RelationTypeCalls,
+						Weight:       1,
+					}
+					if err := graph.AddEdge(edge); err != nil {
+						idx.logger.Debug("Failed to add edge", "from", chunk.ID, "to", targetChunkID, "error", err)
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Git履歴から編集頻度を取得（過去90日間）
+	since := time.Now().AddDate(0, 0, -90)
+	editFreqs, err := idx.gitClient.GetFileEditFrequencies(ctx, repoPath, params.versionIdentifier, since)
+	if err != nil {
+		idx.logger.Warn("Failed to get file edit frequencies", "error", err)
+		// 編集頻度が取得できなくても続行（空のマップを使用）
+		editFreqs = make(map[string]*gitprovider.FileEditFrequency)
+	}
+
+	// 4. editHistory形式に変換
+	editHistory := make(map[string]*importance.FileEditHistory)
+	for filePath, freq := range editFreqs {
+		editHistory[filePath] = &importance.FileEditHistory{
+			FilePath:   freq.FilePath,
+			EditCount:  freq.EditCount,
+			LastEdited: freq.LastEdited,
+		}
+	}
+
+	// 5. 重要度スコアを計算
+	config := importance.DefaultWeights()
+	calculator := importance.NewCalculator(graph, editHistory, &config)
+
+	scores, err := calculator.CalculateAll(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to calculate importance scores: %w", err)
+	}
+
+	// 6. スコアをDBに保存
+	scoreMap := make(map[uuid.UUID]float64)
+	for chunkID, score := range scores {
+		scoreMap[chunkID] = score.FinalScore
+	}
+
+	if err := adapters.Index.BatchUpdateChunkImportanceScores(ctx, scoreMap); err != nil {
+		return fmt.Errorf("failed to save importance scores: %w", err)
+	}
+
+	idx.logger.Info("Importance scores calculated and saved",
+		"totalChunks", len(scoreMap),
+		"graphNodes", len(graph.Nodes),
+		"graphEdges", len(graph.Edges),
+	)
+
+	return nil
+}
+
+// findChunkIDByName は名前からチャンクIDを検索します（簡易版）
+func (idx *Indexer) findChunkIDByName(chunks []*models.Chunk, name string) *uuid.UUID {
+	for _, chunk := range chunks {
+		if chunk.Name != nil && *chunk.Name == name {
+			return &chunk.ID
+		}
+	}
+	return nil
+}
+
+// stringPtrOrEmpty はstring pointerを安全に文字列に変換します
+func stringPtrOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// generateAndDisplayCoverageAlerts はカバレッジマップを構築してアラートを生成・表示します (Phase 2タスク8)
+func (idx *Indexer) generateAndDisplayCoverageAlerts(ctx context.Context, snapshotIDStr string, versionIdentifier string) {
+	// スナップショットIDをパース
+	snapshotID, err := uuid.Parse(snapshotIDStr)
+	if err != nil {
+		idx.logger.Warn("Failed to parse snapshot ID for coverage alerts", "snapshotID", snapshotIDStr, "error", err)
+		return
+	}
+
+	// カバレッジマップを構築
+	coverageBuilder := idx.createCoverageBuilder()
+	coverageMap, err := coverageBuilder.BuildCoverageMap(ctx, snapshotID, versionIdentifier)
+	if err != nil {
+		idx.logger.Warn("Failed to build coverage map", "error", err)
+		return
+	}
+
+	// アラートを生成
+	alertGen := idx.createAlertGenerator()
+	alerts, err := alertGen.GenerateAlerts(ctx, snapshotID, coverageMap)
+	if err != nil {
+		idx.logger.Warn("Failed to generate coverage alerts", "error", err)
+		return
+	}
+
+	// アラートが存在しない場合は何もしない
+	if len(alerts) == 0 {
+		idx.logger.Info("No coverage alerts generated")
+		return
+	}
+
+	// アラートを表示
+	alertPrinter := idx.createAlertPrinter()
+	alertPrinter.Print(alerts)
+
+	// ログにも記録
+	idx.logger.Info("Coverage alerts generated", "count", len(alerts))
+	for _, alert := range alerts {
+		idx.logger.Warn("Coverage alert",
+			"severity", alert.Severity,
+			"domain", alert.Domain,
+			"message", alert.Message,
+		)
+	}
+}
+
+// createCoverageBuilder はCoverageBuilderを作成します
+func (idx *Indexer) createCoverageBuilder() *coverage.CoverageBuilder {
+	return coverage.NewCoverageBuilder(idx.indexReadRepo)
+}
+
+// createAlertGenerator はAlertGeneratorを作成します
+func (idx *Indexer) createAlertGenerator() *coverage.AlertGenerator {
+	return coverage.NewAlertGeneratorWithDefaults(idx.indexReadRepo)
+}
+
+// createAlertPrinter はAlertPrinterを作成します
+func (idx *Indexer) createAlertPrinter() *coverage.AlertPrinter {
+	// 標準出力にアラートを表示
+	return coverage.NewAlertPrinter(os.Stdout)
 }

@@ -51,6 +51,11 @@ func NewAlertGenerator(indexRepo *repository.IndexRepositoryR, config *AlertConf
 	}
 }
 
+// NewAlertGeneratorWithDefaults はデフォルト設定でAlertGeneratorを作成します
+func NewAlertGeneratorWithDefaults(indexRepo *repository.IndexRepositoryR) *AlertGenerator {
+	return NewAlertGenerator(indexRepo, DefaultAlertConfig())
+}
+
 // Config は現在のアラート設定を返します
 func (ag *AlertGenerator) Config() *AlertConfig {
 	return ag.config
@@ -173,35 +178,27 @@ func (ag *AlertGenerator) checkADRCoverage(ctx context.Context, snapshotID uuid.
 
 // countADRDocuments はADRドキュメントの総数とインデックス済み数を取得します
 func (ag *AlertGenerator) countADRDocuments(ctx context.Context, snapshotID uuid.UUID) (int, int, error) {
-	// この実装は簡易版です。実際にはrepository層でADRドキュメントを検出するメソッドを追加する必要があります
-	// ここでは、GetUnindexedImportantFilesを使用してADR関連のファイルをカウントします
-
-	unindexedFiles, err := ag.indexRepo.GetUnindexedImportantFiles(ctx, snapshotID)
+	// snapshot_filesから全ファイルを取得
+	snapshotFiles, err := ag.indexRepo.GetSnapshotFilesBySnapshot(ctx, snapshotID)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("failed to get snapshot files: %w", err)
 	}
 
-	// ADRドキュメントの数をカウント
+	// ADRドキュメントの総数とインデックス済み数をカウント
 	totalADRs := 0
-	unindexedADRs := 0
-
-	for _, file := range unindexedFiles {
-		lowerFile := strings.ToLower(file)
-		// ADRドキュメントのパターン: /docs/adr/, /docs/design/, /docs/decisions/
-		if strings.Contains(lowerFile, "/adr/") ||
-			strings.Contains(lowerFile, "/design/") ||
-			strings.Contains(lowerFile, "/decisions/") {
-			totalADRs++
-			unindexedADRs++
-		}
-	}
-
-	// インデックス済みADR数 = 総ADR数 - 未インデックスADR数
-	// ただし、この簡易実装では総ADR数を正確に取得できないため、未インデックスADR数のみを使用
-	// 実際の実装では、snapshot_filesテーブルから総数を取得する必要があります
 	indexedADRs := 0
-	if totalADRs > unindexedADRs {
-		indexedADRs = totalADRs - unindexedADRs
+
+	for _, sf := range snapshotFiles {
+		lowerPath := strings.ToLower(sf.FilePath)
+		// ADRドキュメントのパターン: /adr/, /design/, /decisions/
+		if strings.Contains(lowerPath, "/adr/") ||
+			strings.Contains(lowerPath, "/design/") ||
+			strings.Contains(lowerPath, "/decisions/") {
+			totalADRs++
+			if sf.Indexed {
+				indexedADRs++
+			}
+		}
 	}
 
 	return totalADRs, indexedADRs, nil
@@ -239,31 +236,3 @@ func (ag *AlertGenerator) checkTestCoverage(coverageMap *models.CoverageMap) []m
 	return alerts
 }
 
-// PrintAlerts はアラートを標準出力に表示します
-func (ag *AlertGenerator) PrintAlerts(alerts []models.Alert) {
-	if len(alerts) == 0 {
-		fmt.Println("✓ カバレッジアラートはありません")
-		return
-	}
-
-	fmt.Printf("\n⚠ カバレッジアラート: %d件\n", len(alerts))
-	fmt.Println(strings.Repeat("=", 80))
-
-	for i, alert := range alerts {
-		severitySymbol := "⚠"
-		if alert.Severity == models.AlertSeverityError {
-			severitySymbol = "✗"
-		}
-
-		fmt.Printf("\n[%d] %s [%s] %s\n", i+1, severitySymbol, alert.Severity, alert.Message)
-		if alert.Domain != "" {
-			fmt.Printf("    ドメイン: %s\n", alert.Domain)
-		}
-		if alert.Details != nil {
-			fmt.Printf("    詳細: %v\n", alert.Details)
-		}
-		fmt.Printf("    生成日時: %s\n", alert.GeneratedAt.Format(time.RFC3339))
-	}
-
-	fmt.Println(strings.Repeat("=", 80))
-}

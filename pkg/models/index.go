@@ -50,6 +50,13 @@ type Chunk struct {
 	Level           int      `json:"level"`
 	ImportanceScore *float64 `json:"importanceScore,omitempty"`
 
+	// 詳細な依存関係情報 (Phase 2タスク4追加)
+	StandardImports  []string `json:"standardImports,omitempty"`  // 標準ライブラリ
+	ExternalImports  []string `json:"externalImports,omitempty"`  // 外部依存
+	InternalCalls    []string `json:"internalCalls,omitempty"`    // 内部関数呼び出し
+	ExternalCalls    []string `json:"externalCalls,omitempty"`    // 外部関数呼び出し
+	TypeDependencies []string `json:"typeDependencies,omitempty"` // 型依存
+
 	// トレーサビリティ・バージョン管理 (Phase 1追加)
 	SourceSnapshotID *uuid.UUID `json:"sourceSnapshotID,omitempty"`
 	GitCommitHash    *string    `json:"gitCommitHash,omitempty"`

@@ -57,6 +57,13 @@ type ChunkMetadata struct {
 	Level           int
 	ImportanceScore *float64
 
+	// Phase 2タスク4で追加: 詳細な依存関係情報
+	StandardImports  []string `json:"standardImports,omitempty"`  // 標準ライブラリ
+	ExternalImports  []string `json:"externalImports,omitempty"`  // 外部依存
+	InternalCalls    []string `json:"internalCalls,omitempty"`    // 内部関数呼び出し
+	ExternalCalls    []string `json:"externalCalls,omitempty"`    // 外部関数呼び出し
+	TypeDependencies []string `json:"typeDependencies,omitempty"` // 型依存
+
 	// トレーサビリティ・バージョン管理
 	SourceSnapshotID *uuid.UUID
 	GitCommitHash    *string
@@ -180,6 +187,11 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 	// JSONBフィールドの準備
 	imports := JSONBFromStringSlice(metadata.Imports)
 	calls := JSONBFromStringSlice(metadata.Calls)
+	standardImports := JSONBFromStringSlice(metadata.StandardImports)
+	externalImports := JSONBFromStringSlice(metadata.ExternalImports)
+	internalCalls := JSONBFromStringSlice(metadata.InternalCalls)
+	externalCalls := JSONBFromStringSlice(metadata.ExternalCalls)
+	typeDependencies := JSONBFromStringSlice(metadata.TypeDependencies)
 
 	chunk, err := rw.q.CreateChunk(ctx, sqlc.CreateChunkParams{
 		FileID:      UUIDToPgtype(fileID),
@@ -204,6 +216,12 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 		// 階層関係と重要度
 		Level:           int32(metadata.Level),
 		ImportanceScore: Float64PtrToPgNumeric(metadata.ImportanceScore),
+		// 詳細な依存関係情報 (Phase 2タスク4)
+		StandardImports:  standardImports,
+		ExternalImports:  externalImports,
+		InternalCalls:    internalCalls,
+		ExternalCalls:    externalCalls,
+		TypeDependencies: typeDependencies,
 		// トレーサビリティ・バージョン管理
 		SourceSnapshotID: UUIDPtrToPgtype(metadata.SourceSnapshotID),
 		GitCommitHash:    StringPtrToPgtext(metadata.GitCommitHash),
@@ -464,6 +482,12 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		// 階層関係と重要度 (Phase 2追加)
 		Level:           int(row.Level),
 		ImportanceScore: PgtypeToFloat64Ptr(row.ImportanceScore),
+		// 詳細な依存関係情報 (Phase 2タスク4追加)
+		StandardImports:  StringSliceFromJSONB(row.StandardImports),
+		ExternalImports:  StringSliceFromJSONB(row.ExternalImports),
+		InternalCalls:    StringSliceFromJSONB(row.InternalCalls),
+		ExternalCalls:    StringSliceFromJSONB(row.ExternalCalls),
+		TypeDependencies: StringSliceFromJSONB(row.TypeDependencies),
 		// トレーサビリティ・バージョン管理 (Phase 1追加)
 		SourceSnapshotID: PgtypeToUUIDPtr(row.SourceSnapshotID),
 		GitCommitHash:    PgtextToStringPtr(row.GitCommitHash),

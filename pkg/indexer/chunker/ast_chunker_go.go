@@ -85,15 +85,15 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 		}
 	}
 
-	// インポートリストを抽出
-	imports := ac.extractImports(file)
+	// インポートリストを抽出（詳細版）
+	importInfo := ac.extractImportsDetailed(file)
 
 	// トップレベルの宣言を処理
 	for _, decl := range file.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			// 関数・メソッドを抽出（ロジック分割を含む）
-			chunks, excluded := ac.extractFunctionWithLogicSplitting(d, file, lines, imports, chunker)
+			chunks, excluded := ac.extractFunctionWithLogicSplittingDetailed(d, file, lines, importInfo, chunker)
 			if chunks != nil {
 				for _, chunk := range chunks {
 					// レベル設定（関数チャンクはレベル2、ロジックチャンクはレベル3）
@@ -111,8 +111,8 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 				result.HighCommentRatioExcluded++
 			}
 		case *ast.GenDecl:
-			// 型定義、変数、定数を抽出
-			declChunks, excludedCount := ac.extractGenDeclWithMetrics(d, file, lines, imports, chunker)
+			// 型定義、変数、定数を抽出（詳細版）
+			declChunks, excludedCount := ac.extractGenDeclWithMetricsDetailed(d, file, lines, importInfo, chunker)
 			for _, chunk := range declChunks {
 				chunk.Metadata.Level = 2 // レベル2: 関数/クラス単位
 			}
@@ -194,7 +194,14 @@ func (ac *ASTChunkerGo) extractPackageDoc(file *ast.File, lines []string, chunke
 	}
 }
 
-// extractImports はインポート情報を抽出します
+// ImportInfo はインポート情報の詳細を保持します
+type ImportInfo struct {
+	All      []string // 全インポート
+	Standard []string // 標準ライブラリ
+	External []string // 外部依存
+}
+
+// extractImports はインポート情報を抽出します（後方互換性のため）
 func (ac *ASTChunkerGo) extractImports(file *ast.File) []string {
 	var imports []string
 	for _, imp := range file.Imports {
@@ -202,6 +209,59 @@ func (ac *ASTChunkerGo) extractImports(file *ast.File) []string {
 		imports = append(imports, path)
 	}
 	return imports
+}
+
+// extractImportsDetailed はインポート情報を詳細に抽出します
+func (ac *ASTChunkerGo) extractImportsDetailed(file *ast.File) *ImportInfo {
+	info := &ImportInfo{
+		All:      []string{},
+		Standard: []string{},
+		External: []string{},
+	}
+
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		info.All = append(info.All, path)
+
+		// 標準ライブラリの判定
+		// 1. ドットを含まない（例: "fmt", "net/http"）
+		// 2. golang.orgで始まる
+		// 3. 既知の標準ライブラリパス
+		if ac.isStandardLibrary(path) {
+			info.Standard = append(info.Standard, path)
+		} else {
+			info.External = append(info.External, path)
+		}
+	}
+
+	return info
+}
+
+// isStandardLibrary は標準ライブラリかどうかを判定します
+func (ac *ASTChunkerGo) isStandardLibrary(path string) bool {
+	// ドットを含まない、またはgolang.orgで始まる場合は標準ライブラリ
+	if !strings.Contains(path, ".") || strings.HasPrefix(path, "golang.org/x/") {
+		return true
+	}
+
+	// 既知の標準ライブラリパターン
+	stdPrefixes := []string{
+		"archive/", "bufio", "builtin", "bytes", "compress/",
+		"container/", "context", "crypto/", "database/", "debug/",
+		"embed", "encoding/", "errors", "expvar", "flag", "fmt",
+		"go/", "hash/", "html/", "image/", "index/", "io", "log",
+		"math", "mime", "net", "os", "path", "plugin", "reflect",
+		"regexp", "runtime", "sort", "strconv", "strings", "sync",
+		"syscall", "testing", "text/", "time", "unicode", "unsafe",
+	}
+
+	for _, prefix := range stdPrefixes {
+		if strings.HasPrefix(path, prefix) || path == strings.TrimSuffix(prefix, "/") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // extractFunction は関数・メソッドを抽出します（後方互換性のため）
@@ -285,11 +345,131 @@ func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.F
 	}, false // 除外されていない
 }
 
+// extractFunctionWithMetricsDetailed は関数・メソッドを抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
+	startPos := ac.fset.Position(fn.Pos())
+	endPos := ac.fset.Position(fn.End())
+
+	content := ac.extractContent(lines, startPos.Line, endPos.Line)
+	tokens := chunker.countTokens(content)
+
+	// トークンサイズ検証
+	minTokensForAST := 10
+	if tokens < minTokensForAST || tokens > chunker.maxTokens {
+		return nil, false
+	}
+
+	// メタデータ抽出
+	funcName := fn.Name.Name
+	funcType := "function"
+	var parentName *string
+	var signature string
+
+	// メソッドかどうか判定
+	if fn.Recv != nil && len(fn.Recv.List) > 0 {
+		funcType = "method"
+		recv := fn.Recv.List[0]
+		parentName = stringPtr(ac.extractTypeName(recv.Type))
+	}
+
+	// シグネチャを構築
+	signature = ac.buildFunctionSignature(fn)
+
+	// DocCommentを抽出
+	var docComment *string
+	if fn.Doc != nil {
+		doc := fn.Doc.Text()
+		docComment = &doc
+	}
+
+	// 関数内の呼び出しを抽出
+	calls := ac.extractFunctionCalls(fn)
+
+	// 型依存を抽出（Phase 2タスク4）
+	typeDeps := ac.extractTypeDependencies(fn)
+
+	// 品質メトリクス計測
+	loc := ac.calculateLinesOfCode(content)
+	commentRatio := ac.calculateCommentRatio(content)
+	complexity := ac.calculateCyclomaticComplexity(fn)
+
+	// コメント比率95%以上の場合は除外
+	if commentRatio > 0.95 {
+		return nil, true // 除外された
+	}
+
+	return &ChunkWithMetadata{
+		Chunk: &Chunk{
+			Content:   content,
+			StartLine: startPos.Line,
+			EndLine:   endPos.Line,
+			Tokens:    tokens,
+		},
+		Metadata: &repository.ChunkMetadata{
+			Type:                 &funcType,
+			Name:                 &funcName,
+			ParentName:           parentName,
+			Signature:            &signature,
+			DocComment:           docComment,
+			Imports:              importInfo.All,
+			Calls:                calls,
+			LinesOfCode:          &loc,
+			CommentRatio:         &commentRatio,
+			CyclomaticComplexity: &complexity,
+			// 詳細な依存関係情報（Phase 2タスク4）
+			StandardImports:  importInfo.Standard,
+			ExternalImports:  importInfo.External,
+			TypeDependencies: typeDeps,
+		},
+	}, false // 除外されていない
+}
+
 // extractFunctionWithLogicSplitting は関数を抽出し、必要に応じてロジック単位に分割します
 // Phase 2タスク3: レベル3ロジック単位チャンキング
 func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunker *Chunker) ([]*ChunkWithMetadata, bool) {
 	// まず通常の関数チャンクを生成
 	funcChunk, excluded := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunker)
+	if funcChunk == nil {
+		return nil, excluded
+	}
+
+	chunks := []*ChunkWithMetadata{funcChunk}
+
+	// ロジック分割が必要かチェック
+	logicChunker := NewLogicChunker(ac.fset)
+	config := DefaultSplitConfig()
+
+	complexity := 0
+	if funcChunk.Metadata.CyclomaticComplexity != nil {
+		complexity = *funcChunk.Metadata.CyclomaticComplexity
+	}
+
+	if !logicChunker.ShouldSplit(fn, complexity, config) {
+		// 分割不要の場合は関数チャンクのみを返す
+		return chunks, excluded
+	}
+
+	// ロジック単位に分割
+	logicBlocks := logicChunker.SplitIntoLogicBlocks(fn, lines, config)
+	if len(logicBlocks) == 0 {
+		// ブロックが見つからない場合は関数チャンクのみを返す
+		return chunks, excluded
+	}
+
+	// 孫チャンクを生成
+	logicChunks := logicChunker.GenerateLogicChunks(fn, funcChunk.Metadata, lines, logicBlocks, chunker, config)
+
+	// 孫チャンクを追加
+	chunks = append(chunks, logicChunks...)
+
+	return chunks, excluded
+}
+
+// extractFunctionWithLogicSplittingDetailed は関数を抽出し、必要に応じてロジック単位に分割します（詳細版）
+// Phase 2タスク4: 詳細な依存関係情報を含む
+func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunker *Chunker) ([]*ChunkWithMetadata, bool) {
+	// まず詳細な関数チャンクを生成
+	funcChunk, excluded := ac.extractFunctionWithMetricsDetailed(fn, file, lines, importInfo, chunker)
 	if funcChunk == nil {
 		return nil, excluded
 	}
@@ -352,6 +532,38 @@ func (ac *ASTChunkerGo) extractGenDeclWithMetrics(decl *ast.GenDecl, file *ast.F
 		case *ast.ValueSpec:
 			// 変数・定数を処理
 			chunk, excluded := ac.extractValueSpecWithMetrics(s, decl, lines, imports, chunker)
+			if chunk != nil {
+				chunks = append(chunks, chunk)
+			}
+			if excluded {
+				excludedCount++
+			}
+		}
+	}
+
+	return chunks, excludedCount
+}
+
+// extractGenDeclWithMetricsDetailed は型定義、変数、定数を抽出し、除外数を返します（詳細版）
+func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunker *Chunker) ([]*ChunkWithMetadata, int) {
+	var chunks []*ChunkWithMetadata
+	excludedCount := 0
+
+	// 各specを処理
+	for _, spec := range decl.Specs {
+		switch s := spec.(type) {
+		case *ast.TypeSpec:
+			// 型定義を処理
+			chunk, excluded := ac.extractTypeSpecWithMetricsDetailed(s, decl, lines, importInfo, chunker)
+			if chunk != nil {
+				chunks = append(chunks, chunk)
+			}
+			if excluded {
+				excludedCount++
+			}
+		case *ast.ValueSpec:
+			// 変数・定数を処理
+			chunk, excluded := ac.extractValueSpecWithMetricsDetailed(s, decl, lines, importInfo, chunker)
 			if chunk != nil {
 				chunks = append(chunks, chunk)
 			}
@@ -431,6 +643,69 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast
 	}, false // 除外されていない
 }
 
+// extractTypeSpecWithMetricsDetailed は型定義を抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
+	startPos := ac.fset.Position(decl.Pos())
+	endPos := ac.fset.Position(decl.End())
+
+	content := ac.extractContent(lines, startPos.Line, endPos.Line)
+	tokens := chunker.countTokens(content)
+
+	// トークンサイズ検証
+	minTokensForAST := 5
+	if tokens < minTokensForAST || tokens > chunker.maxTokens {
+		return nil, false
+	}
+
+	typeName := spec.Name.Name
+	var typeKind string
+
+	switch spec.Type.(type) {
+	case *ast.StructType:
+		typeKind = "struct"
+	case *ast.InterfaceType:
+		typeKind = "interface"
+	default:
+		typeKind = "type"
+	}
+
+	// DocCommentを抽出
+	var docComment *string
+	if decl.Doc != nil {
+		doc := decl.Doc.Text()
+		docComment = &doc
+	}
+
+	// 品質メトリクス計測
+	loc := ac.calculateLinesOfCode(content)
+	commentRatio := ac.calculateCommentRatio(content)
+
+	// コメント比率95%以上の場合は除外
+	if commentRatio > 0.95 {
+		return nil, true // 除外された
+	}
+
+	return &ChunkWithMetadata{
+		Chunk: &Chunk{
+			Content:   content,
+			StartLine: startPos.Line,
+			EndLine:   endPos.Line,
+			Tokens:    tokens,
+		},
+		Metadata: &repository.ChunkMetadata{
+			Type:         &typeKind,
+			Name:         &typeName,
+			DocComment:   docComment,
+			Imports:      importInfo.All,
+			LinesOfCode:  &loc,
+			CommentRatio: &commentRatio,
+			// 詳細な依存関係情報（Phase 2タスク4）
+			StandardImports: importInfo.Standard,
+			ExternalImports: importInfo.External,
+		},
+	}, false // 除外されていない
+}
+
 // extractValueSpec は変数・定数を抽出します（後方互換性のため）
 func (ac *ASTChunkerGo) extractValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunker *Chunker) *ChunkWithMetadata {
 	chunk, _ := ac.extractValueSpecWithMetrics(spec, decl, lines, imports, chunker)
@@ -497,6 +772,72 @@ func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *a
 			Imports:      imports,
 			LinesOfCode:  &loc,
 			CommentRatio: &commentRatio,
+		},
+	}, false // 除外されていない
+}
+
+// extractValueSpecWithMetricsDetailed は変数・定数を抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+func (ac *ASTChunkerGo) extractValueSpecWithMetricsDetailed(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
+	startPos := ac.fset.Position(decl.Pos())
+	endPos := ac.fset.Position(decl.End())
+
+	content := ac.extractContent(lines, startPos.Line, endPos.Line)
+	tokens := chunker.countTokens(content)
+
+	// トークンサイズ検証
+	minTokensForAST := 10
+	if tokens < minTokensForAST || tokens > chunker.maxTokens {
+		return nil, false
+	}
+
+	// 名前を抽出（複数の変数が同時に宣言されている場合は最初の名前を使用）
+	var name string
+	if len(spec.Names) > 0 {
+		name = spec.Names[0].Name
+	} else {
+		return nil, false
+	}
+
+	var typeKind string
+	if decl.Tok == token.CONST {
+		typeKind = "const"
+	} else {
+		typeKind = "var"
+	}
+
+	// DocCommentを抽出
+	var docComment *string
+	if decl.Doc != nil {
+		doc := decl.Doc.Text()
+		docComment = &doc
+	}
+
+	// 品質メトリクス計測
+	loc := ac.calculateLinesOfCode(content)
+	commentRatio := ac.calculateCommentRatio(content)
+
+	// コメント比率95%以上の場合は除外
+	if commentRatio > 0.95 {
+		return nil, true // 除外された
+	}
+
+	return &ChunkWithMetadata{
+		Chunk: &Chunk{
+			Content:   content,
+			StartLine: startPos.Line,
+			EndLine:   endPos.Line,
+			Tokens:    tokens,
+		},
+		Metadata: &repository.ChunkMetadata{
+			Type:         &typeKind,
+			Name:         &name,
+			DocComment:   docComment,
+			Imports:      importInfo.All,
+			LinesOfCode:  &loc,
+			CommentRatio: &commentRatio,
+			// 詳細な依存関係情報（Phase 2タスク4）
+			StandardImports: importInfo.Standard,
+			ExternalImports: importInfo.External,
 		},
 	}, false // 除外されていない
 }
@@ -742,4 +1083,98 @@ func (ac *ASTChunkerGo) extractContent(lines []string, startLine, endLine int) s
 // stringPtr は文字列のポインタを返します
 func stringPtr(s string) *string {
 	return &s
+}
+
+// extractTypeDependencies は型依存を抽出します（Phase 2タスク4）
+func (ac *ASTChunkerGo) extractTypeDependencies(fn *ast.FuncDecl) []string {
+	typeDeps := make(map[string]bool)
+
+	// 関数シグネチャの型を抽出
+	if fn.Type.Params != nil {
+		for _, param := range fn.Type.Params.List {
+			typeStr := ac.extractTypeString(param.Type)
+			if typeStr != "" && !isBuiltinType(typeStr) {
+				typeDeps[typeStr] = true
+			}
+		}
+	}
+
+	// 戻り値の型を抽出
+	if fn.Type.Results != nil {
+		for _, result := range fn.Type.Results.List {
+			typeStr := ac.extractTypeString(result.Type)
+			if typeStr != "" && !isBuiltinType(typeStr) {
+				typeDeps[typeStr] = true
+			}
+		}
+	}
+
+	// 関数本体内の型参照を抽出
+	if fn.Body != nil {
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch node := n.(type) {
+			case *ast.CompositeLit:
+				// 構造体リテラル
+				typeStr := ac.extractTypeString(node.Type)
+				if typeStr != "" && !isBuiltinType(typeStr) {
+					typeDeps[typeStr] = true
+				}
+			case *ast.CallExpr:
+				// 型変換
+				if ident, ok := node.Fun.(*ast.Ident); ok {
+					if !isBuiltinType(ident.Name) {
+						typeDeps[ident.Name] = true
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	// マップをスライスに変換
+	result := make([]string, 0, len(typeDeps))
+	for typeName := range typeDeps {
+		result = append(result, typeName)
+	}
+	return result
+}
+
+// extractTypeString はast.Exprから型名を文字列として抽出します
+func (ac *ASTChunkerGo) extractTypeString(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		// pkg.Type 形式
+		if x, ok := t.X.(*ast.Ident); ok {
+			return x.Name + "." + t.Sel.Name
+		}
+	case *ast.StarExpr:
+		// ポインタ型
+		return "*" + ac.extractTypeString(t.X)
+	case *ast.ArrayType:
+		// 配列/スライス型
+		return "[]" + ac.extractTypeString(t.Elt)
+	case *ast.MapType:
+		// マップ型
+		return "map[" + ac.extractTypeString(t.Key) + "]" + ac.extractTypeString(t.Value)
+	}
+	return ""
+}
+
+// isBuiltinType は組み込み型かどうかを判定します
+func isBuiltinType(typeName string) bool {
+	builtins := []string{
+		"bool", "byte", "rune", "string",
+		"int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+		"float32", "float64", "complex64", "complex128",
+		"error",
+	}
+	for _, b := range builtins {
+		if typeName == b {
+			return true
+		}
+	}
+	return false
 }

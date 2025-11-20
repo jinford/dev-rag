@@ -17,11 +17,12 @@ INSERT INTO chunks (
     chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls,
     lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context,
     level, importance_score,
+    standard_imports, external_imports, internal_calls, external_calls, type_dependencies,
     source_snapshot_id, git_commit_hash, author, updated_at, indexed_at,
     file_version, is_latest, chunk_key
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
-RETURNING id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+RETURNING id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at
 `
 
 type CreateChunkParams struct {
@@ -45,6 +46,11 @@ type CreateChunkParams struct {
 	EmbeddingContext     pgtype.Text      `json:"embedding_context"`
 	Level                int32            `json:"level"`
 	ImportanceScore      pgtype.Numeric   `json:"importance_score"`
+	StandardImports      []byte           `json:"standard_imports"`
+	ExternalImports      []byte           `json:"external_imports"`
+	InternalCalls        []byte           `json:"internal_calls"`
+	ExternalCalls        []byte           `json:"external_calls"`
+	TypeDependencies     []byte           `json:"type_dependencies"`
 	SourceSnapshotID     pgtype.UUID      `json:"source_snapshot_id"`
 	GitCommitHash        pgtype.Text      `json:"git_commit_hash"`
 	Author               pgtype.Text      `json:"author"`
@@ -77,6 +83,11 @@ func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk
 		arg.EmbeddingContext,
 		arg.Level,
 		arg.ImportanceScore,
+		arg.StandardImports,
+		arg.ExternalImports,
+		arg.InternalCalls,
+		arg.ExternalCalls,
+		arg.TypeDependencies,
 		arg.SourceSnapshotID,
 		arg.GitCommitHash,
 		arg.Author,
@@ -109,6 +120,11 @@ func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk
 		&i.EmbeddingContext,
 		&i.Level,
 		&i.ImportanceScore,
+		&i.StandardImports,
+		&i.ExternalImports,
+		&i.InternalCalls,
+		&i.ExternalCalls,
+		&i.TypeDependencies,
 		&i.SourceSnapshotID,
 		&i.GitCommitHash,
 		&i.Author,
@@ -143,7 +159,7 @@ func (q *Queries) DeleteChunksByFile(ctx context.Context, fileID pgtype.UUID) er
 }
 
 const findChunksByContentHash = `-- name: FindChunksByContentHash :many
-SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
 WHERE content_hash = $1
 ORDER BY created_at DESC
 `
@@ -179,6 +195,11 @@ func (q *Queries) FindChunksByContentHash(ctx context.Context, contentHash strin
 			&i.EmbeddingContext,
 			&i.Level,
 			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
 			&i.SourceSnapshotID,
 			&i.GitCommitHash,
 			&i.Author,
@@ -200,7 +221,7 @@ func (q *Queries) FindChunksByContentHash(ctx context.Context, contentHash strin
 }
 
 const getChunk = `-- name: GetChunk :one
-SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
 WHERE id = $1
 `
 
@@ -229,6 +250,11 @@ func (q *Queries) GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error) {
 		&i.EmbeddingContext,
 		&i.Level,
 		&i.ImportanceScore,
+		&i.StandardImports,
+		&i.ExternalImports,
+		&i.InternalCalls,
+		&i.ExternalCalls,
+		&i.TypeDependencies,
 		&i.SourceSnapshotID,
 		&i.GitCommitHash,
 		&i.Author,
@@ -243,7 +269,7 @@ func (q *Queries) GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error) {
 }
 
 const listChunksByFile = `-- name: ListChunksByFile :many
-SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
 WHERE file_id = $1
 ORDER BY ordinal
 `
@@ -279,6 +305,11 @@ func (q *Queries) ListChunksByFile(ctx context.Context, fileID pgtype.UUID) ([]C
 			&i.EmbeddingContext,
 			&i.Level,
 			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
 			&i.SourceSnapshotID,
 			&i.GitCommitHash,
 			&i.Author,
@@ -300,7 +331,7 @@ func (q *Queries) ListChunksByFile(ctx context.Context, fileID pgtype.UUID) ([]C
 }
 
 const listChunksByOrdinalRange = `-- name: ListChunksByOrdinalRange :many
-SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
 WHERE file_id = $1 AND ordinal BETWEEN $2 AND $3
 ORDER BY ordinal
 `
@@ -342,6 +373,11 @@ func (q *Queries) ListChunksByOrdinalRange(ctx context.Context, arg ListChunksBy
 			&i.EmbeddingContext,
 			&i.Level,
 			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
 			&i.SourceSnapshotID,
 			&i.GitCommitHash,
 			&i.Author,

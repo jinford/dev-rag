@@ -88,7 +88,7 @@ func (q *Queries) GetChildChunkIDs(ctx context.Context, parentChunkID pgtype.UUI
 }
 
 const getChildChunks = `-- name: GetChildChunks :many
-SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
+SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.standard_imports, c.external_imports, c.internal_calls, c.external_calls, c.type_dependencies, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
 FROM chunks c
 INNER JOIN chunk_hierarchy ch ON c.id = ch.child_chunk_id
 WHERE ch.parent_chunk_id = $1
@@ -126,6 +126,11 @@ func (q *Queries) GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID)
 			&i.EmbeddingContext,
 			&i.Level,
 			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
 			&i.SourceSnapshotID,
 			&i.GitCommitHash,
 			&i.Author,
@@ -147,7 +152,7 @@ func (q *Queries) GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID)
 }
 
 const getParentChunk = `-- name: GetParentChunk :one
-SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
+SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.standard_imports, c.external_imports, c.internal_calls, c.external_calls, c.type_dependencies, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
 FROM chunks c
 INNER JOIN chunk_hierarchy ch ON c.id = ch.parent_chunk_id
 WHERE ch.child_chunk_id = $1
@@ -179,6 +184,11 @@ func (q *Queries) GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) 
 		&i.EmbeddingContext,
 		&i.Level,
 		&i.ImportanceScore,
+		&i.StandardImports,
+		&i.ExternalImports,
+		&i.InternalCalls,
+		&i.ExternalCalls,
+		&i.TypeDependencies,
 		&i.SourceSnapshotID,
 		&i.GitCommitHash,
 		&i.Author,

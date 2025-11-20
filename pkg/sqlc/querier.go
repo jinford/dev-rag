@@ -15,6 +15,7 @@ type Querier interface {
 	CountChildChunks(ctx context.Context, parentChunkID pgtype.UUID) (int64, error)
 	CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk, error)
 	CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error)
+	CreateDependency(ctx context.Context, arg CreateDependencyParams) error
 	CreateEmbedding(ctx context.Context, arg CreateEmbeddingParams) (Embedding, error)
 	CreateEmbeddingBatch(ctx context.Context, arg []CreateEmbeddingBatchParams) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
@@ -30,6 +31,7 @@ type Querier interface {
 	DeleteChunkHierarchyByChild(ctx context.Context, childChunkID pgtype.UUID) error
 	DeleteChunkHierarchyByParent(ctx context.Context, parentChunkID pgtype.UUID) error
 	DeleteChunksByFile(ctx context.Context, fileID pgtype.UUID) error
+	DeleteDependenciesByChunk(ctx context.Context, fromChunkID pgtype.UUID) error
 	DeleteEmbedding(ctx context.Context, chunkID pgtype.UUID) error
 	DeleteFile(ctx context.Context, id pgtype.UUID) error
 	DeleteFilesByPaths(ctx context.Context, arg DeleteFilesByPathsParams) error
@@ -41,9 +43,13 @@ type Querier interface {
 	DeleteWikiMetadata(ctx context.Context, id pgtype.UUID) error
 	FindChunksByContentHash(ctx context.Context, contentHash string) ([]Chunk, error)
 	FindFilesByContentHash(ctx context.Context, contentHash string) ([]File, error)
+	GetAllDependencies(ctx context.Context) ([]ChunkDependency, error)
 	GetChildChunkIDs(ctx context.Context, parentChunkID pgtype.UUID) ([]pgtype.UUID, error)
 	GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error)
 	GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error)
+	GetDependenciesByChunk(ctx context.Context, fromChunkID pgtype.UUID) ([]ChunkDependency, error)
+	GetDependenciesByChunkAndType(ctx context.Context, arg GetDependenciesByChunkAndTypeParams) ([]ChunkDependency, error)
+	GetDependencyCount(ctx context.Context, fromChunkID pgtype.UUID) (int64, error)
 	// ドメイン別のファイル数とチャンク数を集計
 	GetDomainCoverageBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageBySnapshotRow, error)
 	GetDomainCoverageStats(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageStatsRow, error)
@@ -55,6 +61,8 @@ type Querier interface {
 	GetFilesByDomain(ctx context.Context, arg GetFilesByDomainParams) ([]File, error)
 	GetGitRef(ctx context.Context, id pgtype.UUID) (GitRef, error)
 	GetGitRefByName(ctx context.Context, arg GetGitRefByNameParams) (GitRef, error)
+	GetIncomingDependenciesByChunk(ctx context.Context, toChunkID pgtype.UUID) ([]ChunkDependency, error)
+	GetIncomingDependencyCount(ctx context.Context, toChunkID pgtype.UUID) (int64, error)
 	GetLatestIndexedSnapshot(ctx context.Context, sourceID pgtype.UUID) (SourceSnapshot, error)
 	GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) (Chunk, error)
 	GetParentChunkID(ctx context.Context, childChunkID pgtype.UUID) (pgtype.UUID, error)

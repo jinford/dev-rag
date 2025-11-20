@@ -157,14 +157,15 @@ func TestNewAlertGenerator(t *testing.T) {
 	assert.Equal(t, 20, ag2.config.ADRTotalThreshold)
 }
 
-func TestAlertGenerator_PrintAlerts(t *testing.T) {
-	ag := NewAlertGenerator(nil, nil)
+func TestAlertPrinter_Print(t *testing.T) {
+	// AlertPrinterのテスト
+	// 標準出力のキャプチャは難しいので、パニックしないことのみ確認
 
 	// アラートなしの場合
 	t.Run("アラートなしの場合", func(t *testing.T) {
-		// 標準出力のキャプチャは難しいので、パニックしないことのみ確認
+		printer := NewAlertPrinter(&mockWriter{})
 		assert.NotPanics(t, func() {
-			ag.PrintAlerts([]models.Alert{})
+			printer.Print([]models.Alert{})
 		})
 	})
 
@@ -185,10 +186,21 @@ func TestAlertGenerator_PrintAlerts(t *testing.T) {
 			},
 		}
 
+		printer := NewAlertPrinter(&mockWriter{})
 		assert.NotPanics(t, func() {
-			ag.PrintAlerts(alerts)
+			printer.Print(alerts)
 		})
 	})
+}
+
+// mockWriter はテスト用のio.Writer実装
+type mockWriter struct {
+	content []byte
+}
+
+func (m *mockWriter) Write(p []byte) (n int, err error) {
+	m.content = append(m.content, p...)
+	return len(p), nil
 }
 
 func TestAlertConfig_CustomThresholds(t *testing.T) {
