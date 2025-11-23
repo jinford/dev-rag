@@ -306,3 +306,90 @@ COMMENT ON COLUMN chunk_dependencies.from_chunk_id IS '依存元のチャンクI
 COMMENT ON COLUMN chunk_dependencies.to_chunk_id IS '依存先のチャンクID';
 COMMENT ON COLUMN chunk_dependencies.dep_type IS '依存関係の種類（call: 関数呼び出し、import: インポート、type: 型依存）';
 COMMENT ON COLUMN chunk_dependencies.symbol IS '依存の対象シンボル名';
+
+-- Phase 4: 品質フィードバックループ
+-- quality_notesテーブル: RAG回答の品質フィードバックを記録
+CREATE TABLE IF NOT EXISTS quality_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id VARCHAR(100) UNIQUE NOT NULL,        -- ビジネス識別子（例: QN-2024-001）
+    severity VARCHAR(20) NOT NULL,               -- 深刻度: critical/high/medium/low
+    note_text TEXT NOT NULL,                     -- 問題の内容
+    linked_files JSONB,                          -- 関連ファイルパスのリスト
+    linked_chunks JSONB,                         -- 関連チャンクIDのリスト
+    reviewer VARCHAR(255) NOT NULL,              -- レビュー者
+    status VARCHAR(20) NOT NULL DEFAULT 'open',  -- open/resolved
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TIMESTAMP,
+    CONSTRAINT chk_quality_notes_severity CHECK (severity IN ('critical', 'high', 'medium', 'low')),
+    CONSTRAINT chk_quality_notes_status CHECK (status IN ('open', 'resolved')),
+    CONSTRAINT chk_quality_notes_resolved CHECK (
+        (status = 'resolved' AND resolved_at IS NOT NULL) OR
+        (status = 'open' AND resolved_at IS NULL)
+    )
+);
+
+-- インデックス作成
+CREATE INDEX IF NOT EXISTS idx_quality_notes_created_at ON quality_notes(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quality_notes_severity ON quality_notes(severity);
+CREATE INDEX IF NOT EXISTS idx_quality_notes_status ON quality_notes(status);
+CREATE INDEX IF NOT EXISTS idx_quality_notes_reviewer ON quality_notes(reviewer);
+
+-- カラムコメント追加
+COMMENT ON TABLE quality_notes IS 'RAG回答の品質フィードバックを記録するテーブル（Phase 4）';
+COMMENT ON COLUMN quality_notes.id IS '品質ノートの一意識別子（UUID）';
+COMMENT ON COLUMN quality_notes.note_id IS 'ビジネス識別子（例: QN-2024-001）';
+COMMENT ON COLUMN quality_notes.severity IS '深刻度（critical: 致命的, high: 高, medium: 中, low: 低）';
+COMMENT ON COLUMN quality_notes.note_text IS '問題の詳細内容';
+COMMENT ON COLUMN quality_notes.linked_files IS '関連ファイルパスのJSONBリスト';
+COMMENT ON COLUMN quality_notes.linked_chunks IS '関連チャンクIDのJSONBリスト';
+COMMENT ON COLUMN quality_notes.reviewer IS 'レビュー者名';
+COMMENT ON COLUMN quality_notes.status IS 'ステータス（open: 未解決, resolved: 解決済み）';
+COMMENT ON COLUMN quality_notes.created_at IS '記録日時';
+COMMENT ON COLUMN quality_notes.resolved_at IS '解決日時（解決済みの場合のみ）';
+
+-- action_backlogテーブル: 品質改善アクションのバックログ管理
+CREATE TABLE IF NOT EXISTS action_backlog (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    action_id VARCHAR(100) UNIQUE NOT NULL,      -- ビジネス識別子（例: ACT-2025-001）
+    prompt_version VARCHAR(10) NOT NULL,         -- プロンプトバージョン
+    priority VARCHAR(10) NOT NULL,               -- 優先度（P1/P2/P3）
+    action_type VARCHAR(50) NOT NULL,            -- アクション種別（reindex/doc_fix/test_update/investigate）
+    title VARCHAR(255) NOT NULL,                 -- アクションタイトル
+    description TEXT NOT NULL,                   -- 詳細説明
+    linked_files JSONB,                          -- 関連ファイルパスのリスト
+    owner_hint VARCHAR(255),                     -- 担当者ヒント
+    acceptance_criteria TEXT NOT NULL,           -- 受け入れ基準
+    status VARCHAR(20) NOT NULL DEFAULT 'open',  -- ステータス（open/noop/completed）
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    CONSTRAINT chk_action_backlog_priority CHECK (priority IN ('P1', 'P2', 'P3')),
+    CONSTRAINT chk_action_backlog_type CHECK (action_type IN ('reindex', 'doc_fix', 'test_update', 'investigate')),
+    CONSTRAINT chk_action_backlog_status CHECK (status IN ('open', 'noop', 'completed')),
+    CONSTRAINT chk_action_backlog_completed CHECK (
+        (status = 'completed' AND completed_at IS NOT NULL) OR
+        (status != 'completed' AND completed_at IS NULL)
+    )
+);
+
+-- インデックス作成
+CREATE INDEX IF NOT EXISTS idx_action_backlog_created_at ON action_backlog(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_action_backlog_priority ON action_backlog(priority);
+CREATE INDEX IF NOT EXISTS idx_action_backlog_action_type ON action_backlog(action_type);
+CREATE INDEX IF NOT EXISTS idx_action_backlog_status ON action_backlog(status);
+CREATE INDEX IF NOT EXISTS idx_action_backlog_pending ON action_backlog(status, created_at) WHERE status = 'open' AND completed_at IS NULL;
+
+-- カラムコメント追加
+COMMENT ON TABLE action_backlog IS '品質改善アクションのバックログを管理するテーブル（Phase 4タスク5）';
+COMMENT ON COLUMN action_backlog.id IS 'アクションの一意識別子（UUID）';
+COMMENT ON COLUMN action_backlog.action_id IS 'ビジネス識別子（例: ACT-2025-001）';
+COMMENT ON COLUMN action_backlog.prompt_version IS 'アクション生成に使用されたプロンプトバージョン';
+COMMENT ON COLUMN action_backlog.priority IS '優先度（P1: 最高, P2: 中, P3: 低）';
+COMMENT ON COLUMN action_backlog.action_type IS 'アクション種別（reindex: 再インデックス, doc_fix: ドキュメント修正, test_update: テスト更新, investigate: 調査）';
+COMMENT ON COLUMN action_backlog.title IS 'アクションのタイトル';
+COMMENT ON COLUMN action_backlog.description IS 'アクションの詳細説明';
+COMMENT ON COLUMN action_backlog.linked_files IS '関連ファイルパスのJSONBリスト';
+COMMENT ON COLUMN action_backlog.owner_hint IS '担当者のヒント（CODEOWNERSやレビュー者から推定）';
+COMMENT ON COLUMN action_backlog.acceptance_criteria IS '受け入れ基準（機械的に検証可能な条件）';
+COMMENT ON COLUMN action_backlog.status IS 'ステータス（open: 未完了, noop: 実行不要, completed: 完了）';
+COMMENT ON COLUMN action_backlog.created_at IS 'アクションの作成日時';
+COMMENT ON COLUMN action_backlog.completed_at IS 'アクションの完了日時（完了済みの場合のみ）';

@@ -12,7 +12,11 @@ import (
 
 type Querier interface {
 	AddChunkRelation(ctx context.Context, arg AddChunkRelationParams) error
+	CountActionsByPriority(ctx context.Context, status string) (CountActionsByPriorityRow, error)
+	CountActionsByStatus(ctx context.Context) (CountActionsByStatusRow, error)
 	CountChildChunks(ctx context.Context, parentChunkID pgtype.UUID) (int64, error)
+	CountQualityNotesBySeverity(ctx context.Context, status string) (CountQualityNotesBySeverityRow, error)
+	CreateAction(ctx context.Context, arg CreateActionParams) (ActionBacklog, error)
 	CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk, error)
 	CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error)
 	CreateDependency(ctx context.Context, arg CreateDependencyParams) error
@@ -21,12 +25,14 @@ type Querier interface {
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateGitRef(ctx context.Context, arg CreateGitRefParams) (GitRef, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
+	CreateQualityNote(ctx context.Context, arg CreateQualityNoteParams) (QualityNote, error)
 	// Phase 2タスク7: カバレッジマップ構築 - snapshot_files操作
 	CreateSnapshotFile(ctx context.Context, arg CreateSnapshotFileParams) (SnapshotFile, error)
 	CreateSource(ctx context.Context, arg CreateSourceParams) (Source, error)
 	CreateSourceIfNotExists(ctx context.Context, arg CreateSourceIfNotExistsParams) (Source, error)
 	CreateSourceSnapshot(ctx context.Context, arg CreateSourceSnapshotParams) (SourceSnapshot, error)
 	CreateWikiMetadata(ctx context.Context, arg CreateWikiMetadataParams) (WikiMetadatum, error)
+	DeleteAction(ctx context.Context, id pgtype.UUID) error
 	DeleteChunk(ctx context.Context, id pgtype.UUID) error
 	DeleteChunkHierarchyByChild(ctx context.Context, childChunkID pgtype.UUID) error
 	DeleteChunkHierarchyByParent(ctx context.Context, parentChunkID pgtype.UUID) error
@@ -38,11 +44,14 @@ type Querier interface {
 	DeleteFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) error
 	DeleteGitRef(ctx context.Context, id pgtype.UUID) error
 	DeleteProduct(ctx context.Context, id pgtype.UUID) error
+	DeleteQualityNote(ctx context.Context, id pgtype.UUID) error
 	DeleteSource(ctx context.Context, id pgtype.UUID) error
 	DeleteSourceSnapshot(ctx context.Context, id pgtype.UUID) error
 	DeleteWikiMetadata(ctx context.Context, id pgtype.UUID) error
 	FindChunksByContentHash(ctx context.Context, contentHash string) ([]Chunk, error)
 	FindFilesByContentHash(ctx context.Context, contentHash string) ([]File, error)
+	GetAction(ctx context.Context, id pgtype.UUID) (ActionBacklog, error)
+	GetActionByActionID(ctx context.Context, actionID string) (ActionBacklog, error)
 	GetAllDependencies(ctx context.Context) ([]ChunkDependency, error)
 	GetChildChunkIDs(ctx context.Context, parentChunkID pgtype.UUID) ([]pgtype.UUID, error)
 	GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error)
@@ -68,6 +77,9 @@ type Querier interface {
 	GetParentChunkID(ctx context.Context, childChunkID pgtype.UUID) (pgtype.UUID, error)
 	GetProduct(ctx context.Context, id pgtype.UUID) (Product, error)
 	GetProductByName(ctx context.Context, name string) (Product, error)
+	GetQualityNote(ctx context.Context, id pgtype.UUID) (QualityNote, error)
+	GetQualityNoteByNoteID(ctx context.Context, noteID string) (QualityNote, error)
+	GetRecentQualityNotes(ctx context.Context) ([]QualityNote, error)
 	GetSnapshotFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]SnapshotFile, error)
 	GetSource(ctx context.Context, id pgtype.UUID) (Source, error)
 	GetSourceByName(ctx context.Context, name string) (Source, error)
@@ -78,14 +90,23 @@ type Querier interface {
 	GetWikiMetadataByProduct(ctx context.Context, productID pgtype.UUID) (WikiMetadatum, error)
 	HasChildren(ctx context.Context, parentChunkID pgtype.UUID) (bool, error)
 	HasParent(ctx context.Context, childChunkID pgtype.UUID) (bool, error)
+	ListActions(ctx context.Context, arg ListActionsParams) ([]ActionBacklog, error)
+	ListActionsByPriority(ctx context.Context, priority string) ([]ActionBacklog, error)
+	ListActionsByStatus(ctx context.Context, status string) ([]ActionBacklog, error)
+	ListActionsByType(ctx context.Context, actionType string) ([]ActionBacklog, error)
 	ListChunksByFile(ctx context.Context, fileID pgtype.UUID) ([]Chunk, error)
 	ListChunksByOrdinalRange(ctx context.Context, arg ListChunksByOrdinalRangeParams) ([]Chunk, error)
 	ListFilesByContentType(ctx context.Context, arg ListFilesByContentTypeParams) ([]File, error)
 	ListFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]File, error)
 	ListGitRefsBySource(ctx context.Context, sourceID pgtype.UUID) ([]GitRef, error)
 	ListIndexedSnapshots(ctx context.Context) ([]SourceSnapshot, error)
+	ListPendingActions(ctx context.Context) ([]ActionBacklog, error)
 	ListProducts(ctx context.Context) ([]Product, error)
 	ListProductsWithStats(ctx context.Context) ([]ListProductsWithStatsRow, error)
+	ListQualityNotes(ctx context.Context, arg ListQualityNotesParams) ([]QualityNote, error)
+	ListQualityNotesByDateRange(ctx context.Context, arg ListQualityNotesByDateRangeParams) ([]QualityNote, error)
+	ListQualityNotesBySeverity(ctx context.Context, severity string) ([]QualityNote, error)
+	ListQualityNotesByStatus(ctx context.Context, status string) ([]QualityNote, error)
 	ListSourceSnapshotsBySource(ctx context.Context, sourceID pgtype.UUID) ([]SourceSnapshot, error)
 	ListSourcesByProduct(ctx context.Context, productID pgtype.UUID) ([]Source, error)
 	ListSourcesByType(ctx context.Context, sourceType string) ([]Source, error)
@@ -95,9 +116,12 @@ type Querier interface {
 	SearchChunksByProduct(ctx context.Context, arg SearchChunksByProductParams) ([]SearchChunksByProductRow, error)
 	SearchChunksBySource(ctx context.Context, arg SearchChunksBySourceParams) ([]SearchChunksBySourceRow, error)
 	SearchSimilarChunks(ctx context.Context, arg SearchSimilarChunksParams) ([]SearchSimilarChunksRow, error)
+	UpdateActionStatus(ctx context.Context, arg UpdateActionStatusParams) (ActionBacklog, error)
 	UpdateChunkImportanceScore(ctx context.Context, arg UpdateChunkImportanceScoreParams) error
 	UpdateGitRef(ctx context.Context, arg UpdateGitRefParams) (GitRef, error)
 	UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error)
+	UpdateQualityNote(ctx context.Context, arg UpdateQualityNoteParams) (QualityNote, error)
+	UpdateQualityNoteStatus(ctx context.Context, arg UpdateQualityNoteStatusParams) (QualityNote, error)
 	UpdateSnapshotFileIndexed(ctx context.Context, arg UpdateSnapshotFileIndexedParams) error
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) (Source, error)
 }

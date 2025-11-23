@@ -9,6 +9,36 @@ import (
 	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
+// 品質改善アクションのバックログを管理するテーブル（Phase 4タスク5）
+type ActionBacklog struct {
+	// アクションの一意識別子（UUID）
+	ID pgtype.UUID `json:"id"`
+	// ビジネス識別子（例: ACT-2025-001）
+	ActionID string `json:"action_id"`
+	// アクション生成に使用されたプロンプトバージョン
+	PromptVersion string `json:"prompt_version"`
+	// 優先度（P1: 最高, P2: 中, P3: 低）
+	Priority string `json:"priority"`
+	// アクション種別（reindex: 再インデックス, doc_fix: ドキュメント修正, test_update: テスト更新, investigate: 調査）
+	ActionType string `json:"action_type"`
+	// アクションのタイトル
+	Title string `json:"title"`
+	// アクションの詳細説明
+	Description string `json:"description"`
+	// 関連ファイルパスのJSONBリスト
+	LinkedFiles []byte `json:"linked_files"`
+	// 担当者のヒント（CODEOWNERSやレビュー者から推定）
+	OwnerHint pgtype.Text `json:"owner_hint"`
+	// 受け入れ基準（機械的に検証可能な条件）
+	AcceptanceCriteria string `json:"acceptance_criteria"`
+	// ステータス（open: 未完了, noop: 実行不要, completed: 完了）
+	Status string `json:"status"`
+	// アクションの作成日時
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	// アクションの完了日時（完了済みの場合のみ）
+	CompletedAt pgtype.Timestamp `json:"completed_at"`
+}
+
 // ファイルを分割したチャンク
 type Chunk struct {
 	// チャンクの一意識別子
@@ -161,6 +191,30 @@ type Product struct {
 	Description pgtype.Text      `json:"description"`
 	CreatedAt   pgtype.Timestamp `json:"created_at"`
 	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
+}
+
+// RAG回答の品質フィードバックを記録するテーブル（Phase 4）
+type QualityNote struct {
+	// 品質ノートの一意識別子（UUID）
+	ID pgtype.UUID `json:"id"`
+	// ビジネス識別子（例: QN-2024-001）
+	NoteID string `json:"note_id"`
+	// 深刻度（critical: 致命的, high: 高, medium: 中, low: 低）
+	Severity string `json:"severity"`
+	// 問題の詳細内容
+	NoteText string `json:"note_text"`
+	// 関連ファイルパスのJSONBリスト
+	LinkedFiles []byte `json:"linked_files"`
+	// 関連チャンクIDのJSONBリスト
+	LinkedChunks []byte `json:"linked_chunks"`
+	// レビュー者名
+	Reviewer string `json:"reviewer"`
+	// ステータス（open: 未解決, resolved: 解決済み）
+	Status string `json:"status"`
+	// 記録日時
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	// 解決日時（解決済みの場合のみ）
+	ResolvedAt pgtype.Timestamp `json:"resolved_at"`
 }
 
 type SnapshotFile struct {

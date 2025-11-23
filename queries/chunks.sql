@@ -42,3 +42,46 @@ WHERE file_id = $1;
 UPDATE chunks
 SET importance_score = $2
 WHERE id = $1;
+
+-- Phase 4タスク8: インデックス鮮度の監視用クエリ
+
+-- name: GetChunksWithGitInfo :many
+-- 鮮度チェックのためにgit_commit_hash付きチャンクを取得
+SELECT
+    c.id,
+    c.chunk_key,
+    c.git_commit_hash,
+    c.updated_at,
+    c.indexed_at,
+    c.is_latest,
+    f.path as file_path
+FROM chunks c
+INNER JOIN files f ON c.file_id = f.id
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+ORDER BY c.indexed_at DESC;
+
+-- name: GetStaleChunks :many
+-- 指定日数以上古いチャンクを取得
+SELECT
+    c.id,
+    c.chunk_key,
+    c.git_commit_hash,
+    c.updated_at,
+    c.indexed_at,
+    c.is_latest,
+    f.path as file_path
+FROM chunks c
+INNER JOIN files f ON c.file_id = f.id
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+  AND c.indexed_at < NOW() - INTERVAL '1 day' * $1
+ORDER BY c.indexed_at ASC;
+
+-- name: CountStaleChunks :one
+-- 指定日数以上古いチャンクの数を取得
+SELECT COUNT(*) as stale_count
+FROM chunks c
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+  AND c.indexed_at < NOW() - INTERVAL '1 day' * $1;
