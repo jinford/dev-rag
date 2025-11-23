@@ -10,7 +10,7 @@ import (
 )
 
 // QualityMetricsCalculator は品質メトリクスを計算するサービスです
-// Phase 4タスク7: 品質メトリクスの定量評価
+// 品質メトリクスの定量評価
 type QualityMetricsCalculator struct {
 	qualityRepo *repository.QualityRepositoryR
 }

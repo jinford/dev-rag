@@ -25,7 +25,7 @@ const (
 )
 
 // QualityNote はRAG回答の品質フィードバックを表します
-// Phase 4タスク1: 品質フィードバックのデータモデル定義
+// 品質フィードバックのデータモデル定義
 type QualityNote struct {
 	ID           uuid.UUID       `json:"id"`
 	NoteID       string          `json:"noteID" validate:"required,max=100"`    // ビジネス識別子（例: QN-2024-001）
@@ -59,14 +59,14 @@ type QualityNoteFilter struct {
 }
 
 // QualityMetrics は品質メトリクスを表します
-// Phase 4タスク7: 品質メトリクスの定量評価用
+// 品質メトリクスの定量評価用
 type QualityMetrics struct {
 	TotalNotes           int                     `json:"totalNotes"`
 	OpenNotes            int                     `json:"openNotes"`
 	ResolvedNotes        int                     `json:"resolvedNotes"`
 	BySeverity           map[QualitySeverity]int `json:"bySeverity"`
 	RecentTrend          []QualityTrendPoint     `json:"recentTrend,omitempty"`
-	// Phase 4タスク8: インデックス鮮度情報
+	// インデックス鮮度情報
 	AverageFreshnessDays float64 `json:"averageFreshnessDays"` // 平均鮮度（日数）
 	StaleChunkCount      int     `json:"staleChunkCount"`      // 古いチャンク数
 	FreshnessThreshold   int     `json:"freshnessThreshold"`   // 鮮度閾値（日数）
@@ -81,7 +81,7 @@ type QualityTrendPoint struct {
 }
 
 // ChunkFreshness はチャンクの鮮度情報を表します
-// Phase 4タスク8: インデックス鮮度の監視用
+// インデックス鮮度の監視用
 type ChunkFreshness struct {
 	ChunkID         uuid.UUID `json:"chunkID"`
 	FilePath        string    `json:"filePath"`

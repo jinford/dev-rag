@@ -271,7 +271,7 @@ func (ac *ASTChunkerGo) extractFunction(fn *ast.FuncDecl, file *ast.File, lines 
 }
 
 // extractFunctionWithMetrics は関数・メソッドを抽出し、除外されたかどうかを返します
-// 大きな関数の場合はロジック単位に分割します (Phase 2タスク3)
+// 大きな関数の場合はロジック単位に分割します
 func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunker *Chunker) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(fn.Pos())
 	endPos := ac.fset.Position(fn.End())
@@ -345,7 +345,7 @@ func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.F
 	}, false // 除外されていない
 }
 
-// extractFunctionWithMetricsDetailed は関数・メソッドを抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+// extractFunctionWithMetricsDetailed は関数・メソッドを抽出し、詳細な依存関係情報を含めます
 func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(fn.Pos())
 	endPos := ac.fset.Position(fn.End())
@@ -385,7 +385,7 @@ func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, fil
 	// 関数内の呼び出しを抽出
 	calls := ac.extractFunctionCalls(fn)
 
-	// 型依存を抽出（Phase 2タスク4）
+	// 型依存を抽出
 	typeDeps := ac.extractTypeDependencies(fn)
 
 	// 品質メトリクス計測
@@ -416,7 +416,7 @@ func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, fil
 			LinesOfCode:          &loc,
 			CommentRatio:         &commentRatio,
 			CyclomaticComplexity: &complexity,
-			// 詳細な依存関係情報（Phase 2タスク4）
+			// 詳細な依存関係情報
 			StandardImports:  importInfo.Standard,
 			ExternalImports:  importInfo.External,
 			TypeDependencies: typeDeps,
@@ -425,7 +425,7 @@ func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, fil
 }
 
 // extractFunctionWithLogicSplitting は関数を抽出し、必要に応じてロジック単位に分割します
-// Phase 2タスク3: レベル3ロジック単位チャンキング
+// レベル3ロジック単位チャンキング
 func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunker *Chunker) ([]*ChunkWithMetadata, bool) {
 	// まず通常の関数チャンクを生成
 	funcChunk, excluded := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunker)
@@ -466,7 +466,7 @@ func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file
 }
 
 // extractFunctionWithLogicSplittingDetailed は関数を抽出し、必要に応じてロジック単位に分割します（詳細版）
-// Phase 2タスク4: 詳細な依存関係情報を含む
+// 詳細な依存関係情報を含む
 func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunker *Chunker) ([]*ChunkWithMetadata, bool) {
 	// まず詳細な関数チャンクを生成
 	funcChunk, excluded := ac.extractFunctionWithMetricsDetailed(fn, file, lines, importInfo, chunker)
@@ -643,7 +643,7 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast
 	}, false // 除外されていない
 }
 
-// extractTypeSpecWithMetricsDetailed は型定義を抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+// extractTypeSpecWithMetricsDetailed は型定義を抽出し、詳細な依存関係情報を含めます
 func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
@@ -699,7 +699,7 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, d
 			Imports:      importInfo.All,
 			LinesOfCode:  &loc,
 			CommentRatio: &commentRatio,
-			// 詳細な依存関係情報（Phase 2タスク4）
+			// 詳細な依存関係情報
 			StandardImports: importInfo.Standard,
 			ExternalImports: importInfo.External,
 		},
@@ -776,7 +776,7 @@ func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *a
 	}, false // 除外されていない
 }
 
-// extractValueSpecWithMetricsDetailed は変数・定数を抽出し、詳細な依存関係情報を含めます（Phase 2タスク4）
+// extractValueSpecWithMetricsDetailed は変数・定数を抽出し、詳細な依存関係情報を含めます
 func (ac *ASTChunkerGo) extractValueSpecWithMetricsDetailed(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunker *Chunker) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
@@ -835,7 +835,7 @@ func (ac *ASTChunkerGo) extractValueSpecWithMetricsDetailed(spec *ast.ValueSpec,
 			Imports:      importInfo.All,
 			LinesOfCode:  &loc,
 			CommentRatio: &commentRatio,
-			// 詳細な依存関係情報（Phase 2タスク4）
+			// 詳細な依存関係情報
 			StandardImports: importInfo.Standard,
 			ExternalImports: importInfo.External,
 		},
@@ -1085,7 +1085,7 @@ func stringPtr(s string) *string {
 	return &s
 }
 
-// extractTypeDependencies は型依存を抽出します（Phase 2タスク4）
+// extractTypeDependencies は型依存を抽出します
 func (ac *ASTChunkerGo) extractTypeDependencies(fn *ast.FuncDecl) []string {
 	typeDeps := make(map[string]bool)
 

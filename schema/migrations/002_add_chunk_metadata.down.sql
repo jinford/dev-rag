@@ -1,4 +1,4 @@
--- Phase 1: chunksテーブルのメタデータカラムを削除（ロールバック用）
+-- chunksテーブルのメタデータカラムを削除（ロールバック用）
 
 -- UNIQUE制約の削除
 ALTER TABLE chunks DROP CONSTRAINT IF EXISTS uq_chunks_chunk_key;

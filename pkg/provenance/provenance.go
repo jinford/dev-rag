@@ -30,7 +30,7 @@ type FileProvenanceHistory struct {
 }
 
 // ProvenanceGraph はチャンクIDから起源情報へのマッピングを管理します
-// Phase 2では軽量なインメモリ実装とし、Phase 3以降でデータベース永続化を検討
+// 現在はインメモリ実装。将来的にデータベース永続化を検討
 type ProvenanceGraph struct {
 	mu sync.RWMutex
 	// チャンクID -> Provenance情報

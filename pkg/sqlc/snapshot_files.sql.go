@@ -27,7 +27,7 @@ type CreateSnapshotFileParams struct {
 	SkipReason pgtype.Text `json:"skip_reason"`
 }
 
-// Phase 2タスク7: カバレッジマップ構築 - snapshot_files操作
+// カバレッジマップ構築 - snapshot_files操作
 func (q *Queries) CreateSnapshotFile(ctx context.Context, arg CreateSnapshotFileParams) (SnapshotFile, error) {
 	row := q.db.QueryRow(ctx, createSnapshotFile,
 		arg.SnapshotID,

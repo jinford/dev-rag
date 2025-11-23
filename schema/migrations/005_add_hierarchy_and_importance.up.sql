@@ -1,4 +1,4 @@
--- Phase 2: 階層関係と重要度スコアの追加
+-- 階層関係と重要度スコアの追加
 
 -- 1. chunksテーブルへのレベルと重要度スコアカラム追加
 ALTER TABLE chunks ADD COLUMN level INTEGER NOT NULL DEFAULT 2;  -- 1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位

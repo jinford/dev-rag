@@ -38,7 +38,7 @@ type SearchFilter struct {
 	ContentType *string
 }
 
-// ChunkMetadata はチャンクのメタデータを表します (Phase 1追加)
+// ChunkMetadata はチャンクのメタデータを表します
 type ChunkMetadata struct {
 	// 構造メタデータ
 	Type                 *string
@@ -53,11 +53,11 @@ type ChunkMetadata struct {
 	CyclomaticComplexity *int
 	EmbeddingContext     *string
 
-	// 階層関係と重要度 (Phase 2追加)
+	// 階層関係と重要度
 	Level           int
 	ImportanceScore *float64
 
-	// Phase 2タスク4で追加: 詳細な依存関係情報
+	// 詳細な依存関係情報
 	StandardImports  []string `json:"standardImports,omitempty"`  // 標準ライブラリ
 	ExternalImports  []string `json:"externalImports,omitempty"`  // 外部依存
 	InternalCalls    []string `json:"internalCalls,omitempty"`    // 内部関数呼び出し
@@ -173,7 +173,7 @@ func (rw *IndexRepositoryRW) DeleteFilesByPaths(ctx context.Context, snapshotID 
 
 // === Chunk 操作 ===
 
-// CreateChunk はチャンクを1件作成します (Phase 1拡張版)
+// CreateChunk はチャンクを1件作成します
 func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, ordinal int, startLine int, endLine int, content string, contentHash string, tokenCount int, metadata *ChunkMetadata) (*models.Chunk, error) {
 	// metadataがnilの場合はデフォルト値を使用（後方互換性のため）
 	if metadata == nil {
@@ -216,7 +216,7 @@ func (rw *IndexRepositoryRW) CreateChunk(ctx context.Context, fileID uuid.UUID, 
 		// 階層関係と重要度
 		Level:           int32(metadata.Level),
 		ImportanceScore: Float64PtrToPgNumeric(metadata.ImportanceScore),
-		// 詳細な依存関係情報 (Phase 2タスク4)
+		// 詳細な依存関係情報
 		StandardImports:  standardImports,
 		ExternalImports:  externalImports,
 		InternalCalls:    internalCalls,
@@ -467,7 +467,7 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		ContentHash: row.ContentHash,
 		TokenCount:  PgtypeToInt(row.TokenCount),
 		CreatedAt:   PgtypeToTime(row.CreatedAt),
-		// 構造メタデータ (Phase 1追加)
+		// 構造メタデータ
 		Type:                 PgtextToStringPtr(row.ChunkType),
 		Name:                 PgtextToStringPtr(row.ChunkName),
 		ParentName:           PgtextToStringPtr(row.ParentName),
@@ -479,16 +479,16 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		CommentRatio:         PgtypeToFloat64Ptr(row.CommentRatio),
 		CyclomaticComplexity: PgtypeToIntPtr(row.CyclomaticComplexity),
 		EmbeddingContext:     PgtextToStringPtr(row.EmbeddingContext),
-		// 階層関係と重要度 (Phase 2追加)
+		// 階層関係と重要度
 		Level:           int(row.Level),
 		ImportanceScore: PgtypeToFloat64Ptr(row.ImportanceScore),
-		// 詳細な依存関係情報 (Phase 2タスク4追加)
+		// 詳細な依存関係情報
 		StandardImports:  StringSliceFromJSONB(row.StandardImports),
 		ExternalImports:  StringSliceFromJSONB(row.ExternalImports),
 		InternalCalls:    StringSliceFromJSONB(row.InternalCalls),
 		ExternalCalls:    StringSliceFromJSONB(row.ExternalCalls),
 		TypeDependencies: StringSliceFromJSONB(row.TypeDependencies),
-		// トレーサビリティ・バージョン管理 (Phase 1追加)
+		// トレーサビリティ・バージョン管理
 		SourceSnapshotID: PgtypeToUUIDPtr(row.SourceSnapshotID),
 		GitCommitHash:    PgtextToStringPtr(row.GitCommitHash),
 		Author:           PgtextToStringPtr(row.Author),
@@ -496,12 +496,12 @@ func convertSQLCChunk(row sqlc.Chunk) *models.Chunk {
 		IndexedAt:        PgtypeToTime(row.IndexedAt),
 		FileVersion:      PgtextToStringPtr(row.FileVersion),
 		IsLatest:         row.IsLatest,
-		// 決定的な識別子 (Phase 1追加)
+		// 決定的な識別子
 		ChunkKey: row.ChunkKey,
 	}
 }
 
-// === Chunk Hierarchy 操作 (Phase 2追加) ===
+// === Chunk Hierarchy 操作 ===
 
 // AddChunkRelation は親子関係を chunk_hierarchy に追加します
 func (rw *IndexRepositoryRW) AddChunkRelation(ctx context.Context, parentID, childID uuid.UUID, ordinal int) error {
@@ -629,7 +629,7 @@ func (r *IndexRepositoryR) GetChunkTree(ctx context.Context, rootID uuid.UUID, m
 	return result, nil
 }
 
-// === ドメイン統計 (Phase 2追加) ===
+// === ドメイン統計 ===
 
 // DomainCoverage はドメイン別のカバレッジ統計を表します
 type DomainCoverage struct {
@@ -684,7 +684,7 @@ func (r *IndexRepositoryR) GetFilesByDomain(ctx context.Context, snapshotID uuid
 	return files, nil
 }
 
-// === SnapshotFile 操作（Phase 2タスク7: カバレッジマップ構築） ===
+// === SnapshotFile 操作（カバレッジマップ構築） ===
 
 // CreateSnapshotFile はスナップショットファイルレコードを作成します
 func (rw *IndexRepositoryRW) CreateSnapshotFile(ctx context.Context, snapshotID uuid.UUID, filePath string, fileSize int64, domain *string, indexed bool, skipReason *string) (*models.SnapshotFile, error) {
@@ -763,7 +763,7 @@ func (r *IndexRepositoryR) GetUnindexedImportantFiles(ctx context.Context, snaps
 	return files, nil
 }
 
-// === 重要度スコア操作（Phase 2タスク5） ===
+// === 重要度スコア操作 ===
 
 // UpdateChunkImportanceScore はチャンクの重要度スコアを更新します
 func (rw *IndexRepositoryRW) UpdateChunkImportanceScore(ctx context.Context, chunkID uuid.UUID, score float64) error {

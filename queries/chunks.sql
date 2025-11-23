@@ -43,7 +43,7 @@ UPDATE chunks
 SET importance_score = $2
 WHERE id = $1;
 
--- Phase 4タスク8: インデックス鮮度の監視用クエリ
+-- インデックス鮮度の監視用クエリ
 
 -- name: GetChunksWithGitInfo :many
 -- 鮮度チェックのためにgit_commit_hash付きチャンクを取得

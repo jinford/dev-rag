@@ -13,7 +13,7 @@ import (
 )
 
 // FreshnessMonitor はインデックスの鮮度を監視するサービスです
-// Phase 4タスク8: インデックス鮮度の監視
+// インデックス鮮度の監視
 type FreshnessMonitor struct {
 	indexRepo   *repository.IndexRepositoryR
 	repoPath    string
@@ -180,7 +180,7 @@ func (m *FreshnessMonitor) GenerateFreshnessReport(ctx context.Context, threshol
 }
 
 // GenerateReindexActions は古いチャンクに対する再インデックスアクションを生成します
-// Phase 4タスク6の一部: 自動再インデックストリガー
+// 自動再インデックストリガー
 func (m *FreshnessMonitor) GenerateReindexActions(ctx context.Context, staleChunks []models.ChunkFreshness) ([]ReindexAction, error) {
 	actions := make([]ReindexAction, 0)
 

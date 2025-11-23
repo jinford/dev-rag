@@ -1,4 +1,4 @@
--- Phase 2タスク7: カバレッジマップ構築 - snapshot_files操作
+-- カバレッジマップ構築 - snapshot_files操作
 
 -- name: CreateSnapshotFile :one
 INSERT INTO snapshot_files (snapshot_id, file_path, file_size, domain, indexed, skip_reason)

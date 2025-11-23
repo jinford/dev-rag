@@ -1,4 +1,4 @@
--- Phase 2: 階層関係と重要度スコアのロールバック
+-- 階層関係と重要度スコアのロールバック
 
 -- 1. 階層関係テーブルの削除
 DROP TABLE IF EXISTS chunk_hierarchy;

@@ -16,7 +16,7 @@ import (
 )
 
 // MetricsQualityAction は品質メトリクスを表示するコマンドのアクション
-// Phase 4タスク7: 品質メトリクスの定量評価
+// 品質メトリクスの定量評価
 func MetricsQualityAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	exportFile := cmd.String("export")

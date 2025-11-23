@@ -9,7 +9,7 @@ import (
 	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
-// 品質改善アクションのバックログを管理するテーブル（Phase 4タスク5）
+// 品質改善アクションのバックログを管理するテーブル
 type ActionBacklog struct {
 	// アクションの一意識別子（UUID）
 	ID pgtype.UUID `json:"id"`
@@ -193,7 +193,7 @@ type Product struct {
 	UpdatedAt   pgtype.Timestamp `json:"updated_at"`
 }
 
-// RAG回答の品質フィードバックを記録するテーブル（Phase 4）
+// RAG回答の品質フィードバックを記録するテーブル
 type QualityNote struct {
 	// 品質ノートの一意識別子（UUID）
 	ID pgtype.UUID `json:"id"`

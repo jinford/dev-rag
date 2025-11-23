@@ -13,7 +13,7 @@ import (
 )
 
 // ReviewRunAction は週次レビューを手動実行するコマンドのアクション
-// Phase 4タスク10: 週次レビューの自動化
+// 週次レビューの自動化
 func ReviewRunAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	weekRange := cmd.Int("week-range")
@@ -99,7 +99,7 @@ func ReviewRunAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 // ReviewScheduleAction は週次レビューをスケジュール実行するコマンドのアクション
-// Phase 4タスク10: 週次レビューの自動化
+// 週次レビューの自動化
 func ReviewScheduleAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	cronSchedule := cmd.String("cron")

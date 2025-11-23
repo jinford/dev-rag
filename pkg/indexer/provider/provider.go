@@ -22,7 +22,7 @@ type SourceDocument struct {
 	Size        int64  // ドキュメントのサイズ（バイト）
 	ContentHash string // ドキュメント内容のハッシュ
 
-	// コミットメタデータ (Phase 1追加)
+	// コミットメタデータ
 	CommitHash string    // Gitコミットハッシュ
 	Author     string    // 最終更新者
 	UpdatedAt  time.Time // ファイル最終更新日時

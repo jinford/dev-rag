@@ -15,7 +15,7 @@ import (
 )
 
 // ReportGenerateAction はHTMLレポートを生成するコマンドのアクション
-// Phase 4タスク9: 品質ダッシュボードの作成
+// 品質ダッシュボードの作成
 func ReportGenerateAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	output := cmd.String("output")

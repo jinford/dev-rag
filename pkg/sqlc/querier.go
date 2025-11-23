@@ -26,7 +26,7 @@ type Querier interface {
 	CreateGitRef(ctx context.Context, arg CreateGitRefParams) (GitRef, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)
 	CreateQualityNote(ctx context.Context, arg CreateQualityNoteParams) (QualityNote, error)
-	// Phase 2タスク7: カバレッジマップ構築 - snapshot_files操作
+	// カバレッジマップ構築 - snapshot_files操作
 	CreateSnapshotFile(ctx context.Context, arg CreateSnapshotFileParams) (SnapshotFile, error)
 	CreateSource(ctx context.Context, arg CreateSourceParams) (Source, error)
 	CreateSourceIfNotExists(ctx context.Context, arg CreateSourceIfNotExistsParams) (Source, error)

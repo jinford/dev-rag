@@ -134,7 +134,7 @@ func (p *Provider) CreateMetadata(params provider.IndexParams) models.SourceMeta
 		metadata["default_ref"] = ref
 	}
 
-	// ローカルパスを設定（Phase 2タスク5: 重要度スコア計算用）
+	// ローカルパスを設定（重要度スコア計算用）
 	dirName, err := p.gitClient.URLToDirectoryName(params.Identifier)
 	if err == nil {
 		repoPath := filepath.Join(p.gitCloneBaseDir, dirName)

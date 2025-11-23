@@ -11,7 +11,7 @@ import (
 
 // SearchOptions は検索オプションを表します
 type SearchOptions struct {
-	// 階層検索オプション (Phase 2タスク10)
+	// 階層検索オプション
 	IncludeParent   bool `json:"includeParent,omitempty"`   // 親チャンクを含める
 	IncludeChildren bool `json:"includeChildren,omitempty"` // 子チャンクを含める
 	MaxDepth        int  `json:"maxDepth,omitempty"`        // 階層の最大深さ（デフォルト: 1）

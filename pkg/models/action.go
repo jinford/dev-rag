@@ -35,7 +35,7 @@ const (
 )
 
 // Action は品質フィードバックから生成された改善アクションを表します
-// Phase 4タスク4: アクション自動生成プロンプトの実装
+// アクション自動生成プロンプトの実装
 type Action struct {
 	ID                 uuid.UUID      `json:"id"`
 	ActionID           string         `json:"actionID" validate:"required,max=100"`     // ビジネス識別子（例: ACT-2024-001）

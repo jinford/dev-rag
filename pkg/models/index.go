@@ -16,8 +16,8 @@ type File struct {
 	Size        int64     `json:"size"`
 	ContentType string    `json:"contentType"`
 	ContentHash string    `json:"contentHash"`
-	Language    *string   `json:"language,omitempty"` // Phase 1追加
-	Domain      *string   `json:"domain,omitempty"`   // Phase 1追加
+	Language    *string   `json:"language,omitempty"`
+	Domain      *string   `json:"domain,omitempty"`
 	CreatedAt   time.Time `json:"createdAt"`
 }
 
@@ -33,7 +33,7 @@ type Chunk struct {
 	TokenCount  int       `json:"tokenCount"`
 	CreatedAt   time.Time `json:"createdAt"`
 
-	// 構造メタデータ (Phase 1追加)
+	// 構造メタデータ
 	Type                 *string  `json:"type,omitempty"`
 	Name                 *string  `json:"name,omitempty"`
 	ParentName           *string  `json:"parentName,omitempty"`
@@ -46,18 +46,18 @@ type Chunk struct {
 	CyclomaticComplexity *int     `json:"cyclomaticComplexity,omitempty"`
 	EmbeddingContext     *string  `json:"embeddingContext,omitempty"`
 
-	// 階層関係と重要度 (Phase 2追加)
+	// 階層関係と重要度
 	Level           int      `json:"level"`
 	ImportanceScore *float64 `json:"importanceScore,omitempty"`
 
-	// 詳細な依存関係情報 (Phase 2タスク4追加)
+	// 詳細な依存関係情報
 	StandardImports  []string `json:"standardImports,omitempty"`  // 標準ライブラリ
 	ExternalImports  []string `json:"externalImports,omitempty"`  // 外部依存
 	InternalCalls    []string `json:"internalCalls,omitempty"`    // 内部関数呼び出し
 	ExternalCalls    []string `json:"externalCalls,omitempty"`    // 外部関数呼び出し
 	TypeDependencies []string `json:"typeDependencies,omitempty"` // 型依存
 
-	// トレーサビリティ・バージョン管理 (Phase 1追加)
+	// トレーサビリティ・バージョン管理
 	SourceSnapshotID *uuid.UUID `json:"sourceSnapshotID,omitempty"`
 	GitCommitHash    *string    `json:"gitCommitHash,omitempty"`
 	Author           *string    `json:"author,omitempty"`
@@ -66,7 +66,7 @@ type Chunk struct {
 	FileVersion      *string    `json:"fileVersion,omitempty"`
 	IsLatest         bool       `json:"isLatest"`
 
-	// 決定的な識別子 (Phase 1追加)
+	// 決定的な識別子
 	ChunkKey string `json:"chunkKey"` // {product_name}/{source_name}/{file_path}#L{start}-L{end}@{commit_hash}
 }
 
@@ -91,7 +91,7 @@ type SearchResult struct {
 }
 
 // SnapshotFile はスナップショット内の全ファイルリスト（インデックス対象外含む）を表します
-// Phase 2タスク7: カバレッジマップ構築用
+// カバレッジマップ構築用
 type SnapshotFile struct {
 	ID         uuid.UUID `json:"id"`
 	SnapshotID uuid.UUID `json:"snapshotID"`
@@ -104,7 +104,7 @@ type SnapshotFile struct {
 }
 
 // DomainCoverage はドメイン別のカバレッジ情報を表します
-// Phase 2タスク7: カバレッジマップ構築用
+// カバレッジマップ構築用
 type DomainCoverage struct {
 	Domain           string  `json:"domain"`
 	TotalFiles       int     `json:"totalFiles"`
@@ -117,7 +117,7 @@ type DomainCoverage struct {
 }
 
 // CoverageMap はリポジトリ全体のカバレッジマップを表します
-// Phase 2タスク7: カバレッジマップ構築用
+// カバレッジマップ構築用
 type CoverageMap struct {
 	SnapshotID       string           `json:"snapshotID"`
 	SnapshotVersion  string           `json:"snapshotVersion"`
@@ -130,7 +130,7 @@ type CoverageMap struct {
 }
 
 // AlertSeverity はアラートの深刻度を表します
-// Phase 2タスク8: カバレッジアラート機能用
+// カバレッジアラート機能用
 type AlertSeverity string
 
 const (
@@ -139,7 +139,7 @@ const (
 )
 
 // Alert はカバレッジに関するアラートを表します
-// Phase 2タスク8: カバレッジアラート機能用
+// カバレッジアラート機能用
 type Alert struct {
 	Severity    AlertSeverity `json:"severity"`
 	Message     string        `json:"message"`

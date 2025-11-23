@@ -125,7 +125,6 @@ CREATE TABLE IF NOT EXISTS chunks (
     content TEXT NOT NULL,
     content_hash VARCHAR(64) NOT NULL,
     token_count INTEGER,
-    -- 構造メタデータ (Phase 1追加)
     chunk_type VARCHAR(50),
     chunk_name VARCHAR(255),
     parent_name VARCHAR(255),
@@ -137,16 +136,13 @@ CREATE TABLE IF NOT EXISTS chunks (
     comment_ratio NUMERIC(3,2),
     cyclomatic_complexity INTEGER,
     embedding_context TEXT,
-    -- 階層関係と重要度 (Phase 2追加)
     level INTEGER NOT NULL DEFAULT 2,  -- 1:ファイルサマリー, 2:関数/クラス, 3:ロジック単位
     importance_score NUMERIC(5,4),     -- 0.0000〜1.0000
-    -- 詳細な依存関係情報 (Phase 2タスク4追加)
     standard_imports JSONB,            -- 標準ライブラリのインポート
     external_imports JSONB,            -- 外部依存のインポート
     internal_calls JSONB,              -- 内部関数呼び出し
     external_calls JSONB,              -- 外部関数呼び出し
     type_dependencies JSONB,           -- 型依存
-    -- トレーサビリティ・バージョン管理 (Phase 1追加)
     source_snapshot_id UUID REFERENCES source_snapshots(id) ON DELETE CASCADE,
     git_commit_hash VARCHAR(40),
     author VARCHAR(255),
@@ -264,7 +260,7 @@ COMMENT ON COLUMN wiki_metadata.output_path IS 'Wikiファイルの出力先パ�
 COMMENT ON COLUMN wiki_metadata.file_count IS '生成されたWikiファイル数';
 COMMENT ON COLUMN wiki_metadata.generated_at IS 'Wiki生成完了日時';
 
--- Phase 2 タスク7: カバレッジマップ構築のためのsnapshot_filesテーブル
+-- カバレッジマップ構築のためのsnapshot_filesテーブル
 -- 全ファイルリスト（インデックス対象外含む）を永続化して正確なカバレッジ率を計算可能にする
 CREATE TABLE IF NOT EXISTS snapshot_files (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -283,7 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_snapshot_files_snapshot ON snapshot_files(snapsho
 CREATE INDEX IF NOT EXISTS idx_snapshot_files_domain ON snapshot_files(domain);
 CREATE INDEX IF NOT EXISTS idx_snapshot_files_indexed ON snapshot_files(indexed);
 
--- Phase 2 タスク4: 依存グラフの構築
+-- 依存グラフの構築
 -- チャンク間の依存関係を管理するテーブル
 CREATE TABLE IF NOT EXISTS chunk_dependencies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -307,7 +303,7 @@ COMMENT ON COLUMN chunk_dependencies.to_chunk_id IS '依存先のチャンクID'
 COMMENT ON COLUMN chunk_dependencies.dep_type IS '依存関係の種類（call: 関数呼び出し、import: インポート、type: 型依存）';
 COMMENT ON COLUMN chunk_dependencies.symbol IS '依存の対象シンボル名';
 
--- Phase 4: 品質フィードバックループ
+-- 品質フィードバックループ
 -- quality_notesテーブル: RAG回答の品質フィードバックを記録
 CREATE TABLE IF NOT EXISTS quality_notes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -335,7 +331,7 @@ CREATE INDEX IF NOT EXISTS idx_quality_notes_status ON quality_notes(status);
 CREATE INDEX IF NOT EXISTS idx_quality_notes_reviewer ON quality_notes(reviewer);
 
 -- カラムコメント追加
-COMMENT ON TABLE quality_notes IS 'RAG回答の品質フィードバックを記録するテーブル（Phase 4）';
+COMMENT ON TABLE quality_notes IS 'RAG回答の品質フィードバックを記録するテーブル';
 COMMENT ON COLUMN quality_notes.id IS '品質ノートの一意識別子（UUID）';
 COMMENT ON COLUMN quality_notes.note_id IS 'ビジネス識別子（例: QN-2024-001）';
 COMMENT ON COLUMN quality_notes.severity IS '深刻度（critical: 致命的, high: 高, medium: 中, low: 低）';
@@ -379,7 +375,7 @@ CREATE INDEX IF NOT EXISTS idx_action_backlog_status ON action_backlog(status);
 CREATE INDEX IF NOT EXISTS idx_action_backlog_pending ON action_backlog(status, created_at) WHERE status = 'open' AND completed_at IS NULL;
 
 -- カラムコメント追加
-COMMENT ON TABLE action_backlog IS '品質改善アクションのバックログを管理するテーブル（Phase 4タスク5）';
+COMMENT ON TABLE action_backlog IS '品質改善アクションのバックログを管理するテーブル';
 COMMENT ON COLUMN action_backlog.id IS 'アクションの一意識別子（UUID）';
 COMMENT ON COLUMN action_backlog.action_id IS 'ビジネス識別子（例: ACT-2025-001）';
 COMMENT ON COLUMN action_backlog.prompt_version IS 'アクション生成に使用されたプロンプトバージョン';

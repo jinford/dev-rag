@@ -15,7 +15,7 @@ import (
 )
 
 // FreshnessCheckAction はインデックス鮮度をチェックするコマンドのアクション
-// Phase 4タスク8: インデックス鮮度の監視
+// インデックス鮮度の監視
 func FreshnessCheckAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	threshold := cmd.Int("threshold")
@@ -94,7 +94,7 @@ func FreshnessAlertAction(ctx context.Context, cmd *cli.Command) error {
 }
 
 // FreshnessReindexAction は自動再インデックスアクションを生成するコマンドのアクション
-// Phase 4タスク6の一部: 自動再インデックストリガー
+// 自動再インデックストリガー
 func FreshnessReindexAction(ctx context.Context, cmd *cli.Command) error {
 	envFile := cmd.String("env")
 	threshold := cmd.Int("threshold")

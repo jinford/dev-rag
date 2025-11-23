@@ -1,4 +1,4 @@
--- Phase 2タスク4: 詳細な依存関係情報の追加
+-- 詳細な依存関係情報の追加
 -- 標準/外部依存の区別、内部/外部呼び出しの区別、型依存を追加
 
 ALTER TABLE chunks ADD COLUMN standard_imports JSONB;

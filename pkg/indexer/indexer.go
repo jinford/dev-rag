@@ -39,11 +39,11 @@ type Indexer struct {
 	embedder          *embedpkg.Embedder
 	contextBuilder    *embedpkg.ContextBuilder
 	detector          *detector.ContentTypeDetector
-	gitClient         *gitprovider.GitClient          // Phase 2タスク5: Git履歴取得用
-	domainClassifier  *prompts.DomainClassifier       // Phase 3タスク5: LLMドメイン分類器
-	useLLMClassifier  bool                            // Phase 3タスク5: LLM分類を使用するかのフラグ
+	gitClient         *gitprovider.GitClient          // Git履歴取得用
+	domainClassifier  *prompts.DomainClassifier       // LLMドメイン分類器
+	useLLMClassifier  bool                            // LLM分類を使用するかのフラグ
 	logger            *slog.Logger
-	metrics           *IndexMetrics // Phase 1追加: メトリクス収集
+	metrics           *IndexMetrics // メトリクス収集
 }
 
 // NewIndexer は新しいIndexerを作成します
@@ -74,7 +74,7 @@ func NewIndexer(
 		detector:       detector,
 		gitClient:      gitClient,
 		logger:         logger,
-		metrics:        NewIndexMetrics(), // Phase 1追加: メトリクス初期化
+		metrics:        NewIndexMetrics(), // メトリクス初期化
 	}, nil
 }
 
@@ -84,7 +84,7 @@ func (idx *Indexer) RegisterProvider(srcProvider provider.SourceProvider) {
 }
 
 // SetDomainClassifier はLLMドメイン分類器を設定します
-// Phase 3タスク5: LLMドメイン分類の統合
+// LLMドメイン分類の統合
 func (idx *Indexer) SetDomainClassifier(classifier *prompts.DomainClassifier) {
 	idx.domainClassifier = classifier
 	idx.useLLMClassifier = true
@@ -161,14 +161,14 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 		processedFiles:    preparedDocs.processedFiles,
 		totalChunks:       preparedDocs.totalChunks,
 		startTime:         startTime,
-		allDocuments:      preparedDocs.allDocuments,  // Phase 2タスク7: 全ドキュメントを渡す
-		sourceProvider:    prov,                       // Phase 2タスク7: プロバイダーを渡す
+		allDocuments:      preparedDocs.allDocuments,  // 全ドキュメントを渡す
+		sourceProvider:    prov,                       // プロバイダーを渡す
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	// Phase 2タスク8: カバレッジアラートを生成・表示
+	// カバレッジアラートを生成・表示
 	idx.generateAndDisplayCoverageAlerts(ctx, result.SnapshotID, versionIdentifier)
 
 	// メトリクスをログ出力
@@ -190,7 +190,7 @@ type preparedDocumentsResult struct {
 	processedFiles  int
 	totalChunks     int
 	currentDocPaths map[string]bool
-	allDocuments    []*provider.SourceDocument // Phase 2タスク7: 全ドキュメント（カバレッジ計算用）
+	allDocuments    []*provider.SourceDocument // 全ドキュメント（カバレッジ計算用）
 }
 
 type preparedFile struct {
@@ -200,16 +200,16 @@ type preparedFile struct {
 	ContentHash string
 	Chunks      []*preparedChunk
 
-	// Phase 1追加: コミットメタデータ
+	// コミットメタデータ
 	CommitHash string
 	Author     string
 	UpdatedAt  time.Time
 
-	// Phase 1追加: chunk_key生成用
+	// chunk_key生成用
 	ProductName string
 	SourceName  string
 
-	// Phase 1追加: 言語とドメイン
+	// 言語とドメイン
 	Language *string
 	Domain   *string
 }
@@ -221,7 +221,7 @@ type preparedChunk struct {
 	Tokens    int
 	Hash      string
 	Embedding []float32
-	Metadata  *repository.ChunkMetadata // Phase 1追加
+	Metadata  *repository.ChunkMetadata
 }
 
 // commitPreparedDocumentParams は書き込み処理に必要な情報をまとめます
@@ -235,8 +235,8 @@ type commitPreparedDocumentParams struct {
 	processedFiles    int
 	totalChunks       int
 	startTime         time.Time
-	allDocuments      []*provider.SourceDocument // Phase 2タスク7: 全ドキュメント（カバレッジ計算用）
-	sourceProvider    provider.SourceProvider    // Phase 2タスク7: プロバイダー（除外判定用）
+	allDocuments      []*provider.SourceDocument // 全ドキュメント（カバレッジ計算用）
+	sourceProvider    provider.SourceProvider    // プロバイダー（除外判定用）
 }
 
 // loadPreviousSnapshot は差分判定用に最新インデックス済みスナップショットとファイルハッシュを読み出します
@@ -293,7 +293,7 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 	prepared := &preparedDocumentsResult{
 		files:           make([]*preparedFile, 0, len(documents)),
 		currentDocPaths: make(map[string]bool, len(documents)),
-		allDocuments:    documents, // Phase 2タスク7: 全ドキュメントを保持（カバレッジ計算用）
+		allDocuments:    documents, // 全ドキュメントを保持（カバレッジ計算用）
 	}
 
 	for _, doc := range documents {
@@ -343,14 +343,14 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 			ContentType: contentType,
 			ContentHash: doc.ContentHash,
 			Chunks:      chunkPayloads,
-			// Phase 1追加: コミットメタデータを保持
+			// コミットメタデータを保持
 			CommitHash:  doc.CommitHash,
 			Author:      doc.Author,
 			UpdatedAt:   doc.UpdatedAt,
-			// Phase 1追加: chunk_key生成用の情報を保持
+			// chunk_key生成用の情報を保持
 			ProductName: productName,
 			SourceName:  sourceName,
-			// Phase 1追加: 言語とドメイン
+			// 言語とドメイン
 			Language:    language,
 			Domain:      domain,
 		})
@@ -484,7 +484,7 @@ func (idx *Indexer) detectLanguage(path string, content string) *string {
 }
 
 // classifyDomain はファイルパスからドメインを分類します
-// Phase 3タスク5: LLM分類とルールベース分類の統合
+// LLM分類とルールベース分類の統合
 func (idx *Indexer) classifyDomain(path string) *string {
 	// ルールベースドメイン分類を実行
 	ruleBasedDomain := idx.classifyDomainRuleBased(path)
@@ -566,7 +566,7 @@ func (idx *Indexer) classifyDomainRuleBased(path string) *string {
 }
 
 // classifyDomainWithLLM はLLMを使用してドメインを分類します
-// Phase 3タスク5: LLMドメイン分類の実装
+// LLMドメイン分類の実装
 func (idx *Indexer) classifyDomainWithLLM(path string, ruleBasedDomain *string) *string {
 	// TODO: 実際のファイルコンテンツを読み込む必要がある場合は、
 	// prepareDocumentsの段階でファイル情報を渡す設計に変更する必要がある
@@ -738,7 +738,7 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			}
 		}
 
-		// Phase 2タスク7: 全ドキュメントをsnapshot_filesに記録（カバレッジ計算用）
+		// 全ドキュメントをsnapshot_filesに記録（カバレッジ計算用）
 		processedFilesPaths := make(map[string]bool)
 		for _, file := range params.preparedFiles {
 			processedFilesPaths[file.Path] = true
@@ -774,8 +774,8 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 				file.Size,
 				file.ContentType,
 				file.ContentHash,
-				file.Language, // Phase 1: 言語情報を渡す
-				file.Domain,   // Phase 1: ドメイン情報を渡す
+				file.Language, // 言語情報を渡す
+				file.Domain,   // ドメイン情報を渡す
 			)
 			if err != nil {
 				return nil, fmt.Errorf("failed to create file %s: %w", file.Path, err)
@@ -791,7 +791,7 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			return nil, fmt.Errorf("failed to mark snapshot as indexed: %w", err)
 		}
 
-		// Phase 2タスク5: 重要度スコアを計算・保存
+		// 重要度スコアを計算・保存
 		if err := idx.calculateAndSaveImportanceScores(ctx, adapters, snapshot.ID, params); err != nil {
 			// エラーが発生してもログに記録するだけで処理は続行
 			idx.logger.Warn("Failed to calculate importance scores", "error", err)
@@ -809,7 +809,7 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 	})
 }
 
-// calculateAndSaveImportanceScores は重要度スコアを計算してDBに保存します (Phase 2タスク5)
+// calculateAndSaveImportanceScores は重要度スコアを計算してDBに保存します
 func (idx *Indexer) calculateAndSaveImportanceScores(ctx context.Context, adapters *txprovider.Adapter, snapshotID uuid.UUID, params *commitPreparedDocumentParams) error {
 	// Gitプロバイダーでない場合はスキップ
 	if params.sourceProvider.GetSourceType() != models.SourceTypeGit {
@@ -963,7 +963,7 @@ func stringPtrOrEmpty(s *string) string {
 	return *s
 }
 
-// generateAndDisplayCoverageAlerts はカバレッジマップを構築してアラートを生成・表示します (Phase 2タスク8)
+// generateAndDisplayCoverageAlerts はカバレッジマップを構築してアラートを生成・表示します
 func (idx *Indexer) generateAndDisplayCoverageAlerts(ctx context.Context, snapshotIDStr string, versionIdentifier string) {
 	// スナップショットIDをパース
 	snapshotID, err := uuid.Parse(snapshotIDStr)

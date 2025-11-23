@@ -1,4 +1,4 @@
--- Phase 2 タスク7: snapshot_filesテーブルの削除
+-- snapshot_filesテーブルの削除
 
 DROP INDEX IF EXISTS idx_snapshot_files_indexed;
 DROP INDEX IF EXISTS idx_snapshot_files_domain;

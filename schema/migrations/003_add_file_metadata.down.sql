@@ -1,4 +1,4 @@
--- Phase 1: filesテーブルのメタデータカラムを削除（ロールバック用）
+-- filesテーブルのメタデータカラムを削除（ロールバック用）
 
 -- インデックスの削除
 DROP INDEX IF EXISTS idx_files_language;

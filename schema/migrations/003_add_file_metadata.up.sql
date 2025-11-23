@@ -1,4 +1,4 @@
--- Phase 1: filesテーブルにlanguageとdomainカラムを追加
+-- filesテーブルにlanguageとdomainカラムを追加
 
 -- メタデータカラムの追加
 ALTER TABLE files ADD COLUMN language VARCHAR(50);     -- プログラミング言語（Go, Python, TypeScript等）

@@ -1,4 +1,4 @@
--- Phase 2 タスク7: カバレッジマップ構築のためのsnapshot_filesテーブル
+-- カバレッジマップ構築のためのsnapshot_filesテーブル
 -- 全ファイルリスト（インデックス対象外含む）を永続化して正確なカバレッジ率を計算可能にする
 
 CREATE TABLE snapshot_files (

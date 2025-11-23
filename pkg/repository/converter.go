@@ -111,7 +111,7 @@ func PgtypeToInt(i pgtype.Int4) int {
 	return int(i.Int32)
 }
 
-// === Phase 1追加: 新しい型変換関数 ===
+// === 型変換関数 ===
 
 // UUIDPtrToPgtype converts *uuid.UUID to pgtype.UUID
 func UUIDPtrToPgtype(id *uuid.UUID) pgtype.UUID {

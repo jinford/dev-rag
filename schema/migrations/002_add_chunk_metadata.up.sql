@@ -1,4 +1,4 @@
--- Phase 1: chunksテーブルにメタデータカラムを追加
+-- chunksテーブルにメタデータカラムを追加
 
 -- 構造メタデータカラム
 ALTER TABLE chunks ADD COLUMN chunk_type VARCHAR(50);        -- function, class, method, etc.

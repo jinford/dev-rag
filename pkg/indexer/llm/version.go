@@ -15,7 +15,7 @@ const (
 	PromptTypeChunkSummary PromptType = "chunk_summary"
 	// PromptTypeDomainClassification はドメイン分類プロンプト
 	PromptTypeDomainClassification PromptType = "domain_classification"
-	// PromptTypeActionGeneration はアクション生成プロンプト（Phase 4で使用）
+	// PromptTypeActionGeneration はアクション生成プロンプト
 	PromptTypeActionGeneration PromptType = "action_generation"
 )
 

@@ -1,4 +1,4 @@
--- Phase 2タスク4: 依存グラフの構築
+-- 依存グラフの構築
 -- チャンク間の依存関係を管理するテーブル
 
 CREATE TABLE IF NOT EXISTS chunk_dependencies (
