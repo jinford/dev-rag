@@ -39,6 +39,24 @@ type ActionBacklog struct {
 	CompletedAt pgtype.Timestamp `json:"completed_at"`
 }
 
+// システム全体のアーキテクチャ要約（LLMが生成）
+type ArchitectureSummary struct {
+	// 要約の一意識別子
+	ID pgtype.UUID `json:"id"`
+	// 対象スナップショットのID
+	SnapshotID pgtype.UUID `json:"snapshot_id"`
+	// 要約種別（overview/tech_stack/data_flow/components）
+	SummaryType string `json:"summary_type"`
+	// LLMが生成した要約（Markdown形式）
+	Summary string `json:"summary"`
+	// Embeddingベクトル（pgvectorの制約により列全体で次元固定、最初のINSERT時の次元で確定）
+	Embedding pgvector_go.Vector `json:"embedding"`
+	// メタデータ（統計情報、次元数等。metadata.dimに実際の次元数を記録）
+	Metadata  []byte           `json:"metadata"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
+}
+
 // ファイルを分割したチャンク
 type Chunk struct {
 	// チャンクの一意識別子
@@ -133,6 +151,28 @@ type ChunkHierarchy struct {
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
+// ディレクトリごとの要約（LLMが生成）
+type DirectorySummary struct {
+	// 要約の一意識別子
+	ID pgtype.UUID `json:"id"`
+	// 対象スナップショットのID
+	SnapshotID pgtype.UUID `json:"snapshot_id"`
+	// ディレクトリパス
+	Path string `json:"path"`
+	// 親ディレクトリパス（階層構造用）
+	ParentPath pgtype.Text `json:"parent_path"`
+	// ディレクトリの深さ（0=ルート）
+	Depth int32 `json:"depth"`
+	// LLMが生成した要約（Markdown形式）
+	Summary string `json:"summary"`
+	// Embeddingベクトル（pgvectorの制約により列全体で次元固定、最初のINSERT時の次元で確定）
+	Embedding pgvector_go.Vector `json:"embedding"`
+	// メタデータ（ファイル数、言語統計、次元数等。metadata.dimに実際の次元数を記録）
+	Metadata  []byte           `json:"metadata"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
+}
+
 // チャンクのEmbeddingベクトル
 type Embedding struct {
 	// チャンクID（主キー兼外部キー）
@@ -163,6 +203,22 @@ type File struct {
 	// ドメイン分類（code, architecture, ops, tests, infra）
 	Domain    pgtype.Text      `json:"domain"`
 	CreatedAt pgtype.Timestamp `json:"created_at"`
+}
+
+// ファイルごとの要約（LLMが生成）
+type FileSummary struct {
+	// 要約の一意識別子
+	ID pgtype.UUID `json:"id"`
+	// 対象ファイルのID
+	FileID pgtype.UUID `json:"file_id"`
+	// LLMが生成した要約（Markdown形式）
+	Summary string `json:"summary"`
+	// Embeddingベクトル（pgvectorの制約により列全体で次元固定、最初のINSERT時の次元で確定）
+	Embedding pgvector_go.Vector `json:"embedding"`
+	// メタデータ（モデル名、次元数、生成日時等。metadata.dimに実際の次元数を記録）
+	Metadata  []byte           `json:"metadata"`
+	CreatedAt pgtype.Timestamp `json:"created_at"`
+	UpdatedAt pgtype.Timestamp `json:"updated_at"`
 }
 
 // Git専用の参照（ブランチ、タグ）管理

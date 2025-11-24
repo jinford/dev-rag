@@ -69,13 +69,6 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 
 	lines := strings.Split(content, "\n")
 
-	// ファイルサマリーチャンクを生成 (Level 1)
-	summaryChunk := ac.generateFileSummaryChunk(file, content, chunker)
-	if summaryChunk != nil {
-		summaryChunk.Metadata.Level = 1 // レベル1: ファイルサマリー
-		result.Chunks = append(result.Chunks, summaryChunk)
-	}
-
 	// パッケージレベルのコメントを抽出
 	if file.Doc != nil {
 		pkgChunk := ac.extractPackageDoc(file, lines, chunker)
@@ -122,40 +115,6 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunker *Chunker) *ASTC
 	}
 
 	return result
-}
-
-// generateFileSummaryChunk はファイル全体のサマリーチャンクを生成します (Level 1)
-func (ac *ASTChunkerGo) generateFileSummaryChunk(file *ast.File, content string, chunker *Chunker) *ChunkWithMetadata {
-	summarizer := NewFileSummarizer()
-	summaryText, err := summarizer.GenerateSummary(content, "go", chunker)
-	if err != nil {
-		return nil
-	}
-
-	tokens := chunker.countTokens(summaryText)
-
-	// サマリーが400トークン以内であることを確認
-	if tokens > 400 {
-		summaryText = chunker.TrimToTokenLimit(summaryText, 400)
-		tokens = 400
-	}
-
-	fileType := "file_summary"
-	fileName := file.Name.Name
-
-	return &ChunkWithMetadata{
-		Chunk: &Chunk{
-			Content:   summaryText,
-			StartLine: 1,
-			EndLine:   len(strings.Split(content, "\n")),
-			Tokens:    tokens,
-		},
-		Metadata: &repository.ChunkMetadata{
-			Type:  &fileType,
-			Name:  &fileName,
-			Level: 1, // レベル1: ファイルサマリー
-		},
-	}
 }
 
 // extractPackageDoc はパッケージレベルのコメントを抽出します

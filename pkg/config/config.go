@@ -39,11 +39,12 @@ type DatabaseConfig struct {
 	SSLMode  string
 }
 
-// OpenAIConfig はOpenAI Embeddings API設定
+// OpenAIConfig はOpenAI API設定（Embeddings + LLM）
 type OpenAIConfig struct {
 	APIKey             string
 	EmbeddingModel     string
 	EmbeddingDimension int
+	LLMModel           string // LLMモデル名（ファイル要約生成等に使用）
 }
 
 // WikiLLMConfig はWiki生成用LLM設定
@@ -90,6 +91,7 @@ func Load(envFilePath string) (*Config, error) {
 			APIKey:             getEnv("OPENAI_API_KEY", ""),
 			EmbeddingModel:     getEnv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"),
 			EmbeddingDimension: getEnvAsInt("OPENAI_EMBEDDING_DIMENSION", 1536),
+			LLMModel:           getEnv("OPENAI_LLM_MODEL", "gpt-4o-mini"), // デフォルトはgpt-4o-mini
 		},
 		WikiLLM: WikiLLMConfig{
 			Provider:    getEnv("WIKI_LLM_PROVIDER", "openai"),

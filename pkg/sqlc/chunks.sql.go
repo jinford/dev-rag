@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countStaleChunks = `-- name: CountStaleChunks :one
+SELECT COUNT(*) as stale_count
+FROM chunks c
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+  AND c.indexed_at < NOW() - INTERVAL '1 day' * $1
+`
+
+// 指定日数以上古いチャンクの数を取得
+func (q *Queries) CountStaleChunks(ctx context.Context, dollar_1 interface{}) (int64, error) {
+	row := q.db.QueryRow(ctx, countStaleChunks, dollar_1)
+	var stale_count int64
+	err := row.Scan(&stale_count)
+	return stale_count, err
+}
+
 const createChunk = `-- name: CreateChunk :one
 INSERT INTO chunks (
     file_id, ordinal, start_line, end_line, content, content_hash, token_count,
@@ -266,6 +282,119 @@ func (q *Queries) GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getChunksWithGitInfo = `-- name: GetChunksWithGitInfo :many
+
+SELECT
+    c.id,
+    c.chunk_key,
+    c.git_commit_hash,
+    c.updated_at,
+    c.indexed_at,
+    c.is_latest,
+    f.path as file_path
+FROM chunks c
+INNER JOIN files f ON c.file_id = f.id
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+ORDER BY c.indexed_at DESC
+`
+
+type GetChunksWithGitInfoRow struct {
+	ID            pgtype.UUID      `json:"id"`
+	ChunkKey      string           `json:"chunk_key"`
+	GitCommitHash pgtype.Text      `json:"git_commit_hash"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	IndexedAt     pgtype.Timestamp `json:"indexed_at"`
+	IsLatest      bool             `json:"is_latest"`
+	FilePath      string           `json:"file_path"`
+}
+
+// インデックス鮮度の監視用クエリ
+// 鮮度チェックのためにgit_commit_hash付きチャンクを取得
+func (q *Queries) GetChunksWithGitInfo(ctx context.Context) ([]GetChunksWithGitInfoRow, error) {
+	rows, err := q.db.Query(ctx, getChunksWithGitInfo)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetChunksWithGitInfoRow{}
+	for rows.Next() {
+		var i GetChunksWithGitInfoRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChunkKey,
+			&i.GitCommitHash,
+			&i.UpdatedAt,
+			&i.IndexedAt,
+			&i.IsLatest,
+			&i.FilePath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getStaleChunks = `-- name: GetStaleChunks :many
+SELECT
+    c.id,
+    c.chunk_key,
+    c.git_commit_hash,
+    c.updated_at,
+    c.indexed_at,
+    c.is_latest,
+    f.path as file_path
+FROM chunks c
+INNER JOIN files f ON c.file_id = f.id
+WHERE c.is_latest = true
+  AND c.git_commit_hash IS NOT NULL
+  AND c.indexed_at < NOW() - INTERVAL '1 day' * $1
+ORDER BY c.indexed_at ASC
+`
+
+type GetStaleChunksRow struct {
+	ID            pgtype.UUID      `json:"id"`
+	ChunkKey      string           `json:"chunk_key"`
+	GitCommitHash pgtype.Text      `json:"git_commit_hash"`
+	UpdatedAt     pgtype.Timestamp `json:"updated_at"`
+	IndexedAt     pgtype.Timestamp `json:"indexed_at"`
+	IsLatest      bool             `json:"is_latest"`
+	FilePath      string           `json:"file_path"`
+}
+
+// 指定日数以上古いチャンクを取得
+func (q *Queries) GetStaleChunks(ctx context.Context, dollar_1 interface{}) ([]GetStaleChunksRow, error) {
+	rows, err := q.db.Query(ctx, getStaleChunks, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetStaleChunksRow{}
+	for rows.Next() {
+		var i GetStaleChunksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ChunkKey,
+			&i.GitCommitHash,
+			&i.UpdatedAt,
+			&i.IndexedAt,
+			&i.IsLatest,
+			&i.FilePath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listChunksByFile = `-- name: ListChunksByFile :many

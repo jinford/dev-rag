@@ -147,3 +147,15 @@ type Alert struct {
 	Details     interface{}   `json:"details,omitempty"`
 	GeneratedAt time.Time     `json:"generatedAt"`
 }
+
+// FileSummary はファイルの要約情報を表します
+// アーキテクチャ理解Wiki生成システム用
+type FileSummary struct {
+	ID        uuid.UUID `json:"id"`
+	FileID    uuid.UUID `json:"fileID"`
+	Summary   string    `json:"summary"`
+	Embedding []float32 `json:"embedding"`
+	Metadata  []byte    `json:"metadata"` // JSONB
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}

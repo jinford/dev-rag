@@ -23,6 +23,7 @@ import (
 	"github.com/jinford/dev-rag/pkg/indexer/llm/prompts"
 	"github.com/jinford/dev-rag/pkg/indexer/provider"
 	gitprovider "github.com/jinford/dev-rag/pkg/indexer/provider/git"
+	"github.com/jinford/dev-rag/pkg/indexer/summarizer"
 	"github.com/jinford/dev-rag/pkg/lock"
 	"github.com/jinford/dev-rag/pkg/models"
 	"github.com/jinford/dev-rag/pkg/repository"
@@ -31,19 +32,20 @@ import (
 
 // Indexer はソースのインデックス化を管理します
 type Indexer struct {
-	sourceReadRepo    *repository.SourceRepositoryR
-	indexReadRepo     *repository.IndexRepositoryR
-	txProvider        *txprovider.TransactionProvider
-	srcProviders      map[models.SourceType]provider.SourceProvider
-	chunker           *chunker.Chunker
-	embedder          *embedpkg.Embedder
-	contextBuilder    *embedpkg.ContextBuilder
-	detector          *detector.ContentTypeDetector
-	gitClient         *gitprovider.GitClient          // Git履歴取得用
-	domainClassifier  *prompts.DomainClassifier       // LLMドメイン分類器
-	useLLMClassifier  bool                            // LLM分類を使用するかのフラグ
-	logger            *slog.Logger
-	metrics           *IndexMetrics // メトリクス収集
+	sourceReadRepo      *repository.SourceRepositoryR
+	indexReadRepo       *repository.IndexRepositoryR
+	txProvider          *txprovider.TransactionProvider
+	srcProviders        map[models.SourceType]provider.SourceProvider
+	chunker             *chunker.Chunker
+	embedder            *embedpkg.Embedder
+	contextBuilder      *embedpkg.ContextBuilder
+	detector            *detector.ContentTypeDetector
+	gitClient           *gitprovider.GitClient             // Git履歴取得用
+	domainClassifier    *prompts.DomainClassifier         // LLMドメイン分類器
+	useLLMClassifier    bool                              // LLM分類を使用するかのフラグ
+	fileSummaryService  *summarizer.FileSummaryService    // ファイル要約サービス（必須）
+	logger              *slog.Logger
+	metrics             *IndexMetrics // メトリクス収集
 }
 
 // NewIndexer は新しいIndexerを作成します
@@ -88,6 +90,12 @@ func (idx *Indexer) RegisterProvider(srcProvider provider.SourceProvider) {
 func (idx *Indexer) SetDomainClassifier(classifier *prompts.DomainClassifier) {
 	idx.domainClassifier = classifier
 	idx.useLLMClassifier = true
+}
+
+// SetFileSummaryService はファイル要約サービスを設定します
+// ファイル要約をfile_summariesテーブルに保存する（必須設定）
+func (idx *Indexer) SetFileSummaryService(service *summarizer.FileSummaryService) {
+	idx.fileSummaryService = service
 }
 
 // IndexResult はインデックス化の結果
@@ -168,6 +176,12 @@ func (idx *Indexer) IndexSource(ctx context.Context, sourceType models.SourceTyp
 		return nil, err
 	}
 
+	// トランザクション完了後、ファイル要約を同期的に生成（Wiki要約生成の前提条件）
+	if err := idx.generateFileSummaries(ctx, preparedDocs.files); err != nil {
+		// ファイル要約生成に失敗してもインデックス化は成功とみなす（警告のみ）
+		idx.logger.Warn("Failed to generate file summaries", "error", err)
+	}
+
 	// カバレッジアラートを生成・表示
 	idx.generateAndDisplayCoverageAlerts(ctx, result.SnapshotID, versionIdentifier)
 
@@ -198,6 +212,7 @@ type preparedFile struct {
 	Size        int64
 	ContentType string
 	ContentHash string
+	Content     string // ファイルコンテンツ（ファイル要約生成用）
 	Chunks      []*preparedChunk
 
 	// コミットメタデータ
@@ -212,6 +227,9 @@ type preparedFile struct {
 	// 言語とドメイン
 	Language *string
 	Domain   *string
+
+	// 生成されたFileID（要約生成用）
+	FileID uuid.UUID
 }
 
 type preparedChunk struct {
@@ -342,6 +360,7 @@ func (idx *Indexer) prepareDocuments(ctx context.Context, prov provider.SourcePr
 			Size:        doc.Size,
 			ContentType: contentType,
 			ContentHash: doc.ContentHash,
+			Content:     doc.Content, // ファイルコンテンツを保持（ファイル要約生成用）
 			Chunks:      chunkPayloads,
 			// コミットメタデータを保持
 			CommitHash:  doc.CommitHash,
@@ -784,6 +803,9 @@ func (idx *Indexer) commitPreparedDocuments(ctx context.Context, params *commitP
 			if err := idx.persistPreparedChunks(ctx, adapters.Index, createdFile.ID, snapshot.ID, file, file.Chunks); err != nil {
 				return nil, fmt.Errorf("failed to persist chunks for file %s: %w", file.Path, err)
 			}
+
+			// FileIDを記録（トランザクション後にファイル要約を生成するため）
+			file.FileID = createdFile.ID
 		}
 
 		// スナップショットをインデックス完了へ更新
@@ -1023,4 +1045,58 @@ func (idx *Indexer) createAlertGenerator() *coverage.AlertGenerator {
 func (idx *Indexer) createAlertPrinter() *coverage.AlertPrinter {
 	// 標準出力にアラートを表示
 	return coverage.NewAlertPrinter(os.Stdout)
+}
+
+// generateFileSummaries はすべてのファイルの要約を同期的に生成します
+func (idx *Indexer) generateFileSummaries(ctx context.Context, files []*preparedFile) error {
+	if idx.fileSummaryService == nil {
+		idx.logger.Debug("FileSummaryService is not configured, skipping file summary generation")
+		return nil
+	}
+
+	successCount := 0
+	failureCount := 0
+
+	for _, file := range files {
+		// 言語情報とコンテンツが必要
+		if file.Language == nil || file.Content == "" {
+			idx.logger.Debug("Skipping file summary generation",
+				"path", file.Path,
+				"reason", "missing language or content",
+			)
+			continue
+		}
+
+		// ファイル要約を生成
+		if err := idx.fileSummaryService.GenerateAndSaveFileSummary(
+			ctx,
+			file.FileID,
+			file.Path,
+			*file.Language,
+			file.Content,
+		); err != nil {
+			idx.logger.Warn("Failed to generate file summary",
+				"fileID", file.FileID,
+				"filePath", file.Path,
+				"error", err,
+			)
+			failureCount++
+			continue
+		}
+
+		successCount++
+	}
+
+	idx.logger.Info("File summary generation completed",
+		"success", successCount,
+		"failure", failureCount,
+		"total", len(files),
+	)
+
+	// すべて失敗した場合のみエラーを返す
+	if successCount == 0 && failureCount > 0 {
+		return fmt.Errorf("all file summary generations failed (%d failures)", failureCount)
+	}
+
+	return nil
 }

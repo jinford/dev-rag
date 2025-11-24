@@ -79,9 +79,29 @@ func NewOpenAIClientWithModel(model string) (*OpenAIClient, error) {
 	return client, nil
 }
 
+// NewOpenAIClientWithAPIKey はAPIキーとモデルを指定してOpenAIClientを作成する
+func NewOpenAIClientWithAPIKey(apiKey, model string) (*OpenAIClient, error) {
+	if apiKey == "" {
+		return nil, ErrAPIKeyNotSet
+	}
+
+	client := openai.NewClient(option.WithAPIKey(apiKey))
+
+	return &OpenAIClient{
+		client:  client,
+		model:   model,
+		timeout: DefaultTimeout,
+	}, nil
+}
+
 // SetTimeout はAPIコールのタイムアウトを設定する
 func (c *OpenAIClient) SetTimeout(timeout time.Duration) {
 	c.timeout = timeout
+}
+
+// GetModelName はモデル名を返す
+func (c *OpenAIClient) GetModelName() string {
+	return c.model
 }
 
 // GenerateCompletion はOpenAI APIを使用してテキストを生成する
