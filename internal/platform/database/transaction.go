@@ -1,4 +1,4 @@
-package txprovider
+package database
 
 import (
 	"context"
@@ -18,6 +18,7 @@ type TransactionProvider struct {
 	pool *pgxpool.Pool
 }
 
+// NewTransactionProvider は新しいTransactionProviderを作成します
 func NewTransactionProvider(pool *pgxpool.Pool) *TransactionProvider {
 	return &TransactionProvider{pool: pool}
 }

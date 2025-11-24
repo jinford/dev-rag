@@ -11,15 +11,17 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	indexingsqlc "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
+	wikisqlc "github.com/jinford/dev-rag/internal/module/wiki/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/models"
 	"github.com/jinford/dev-rag/pkg/search"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	"github.com/jinford/dev-rag/pkg/wiki"
 )
 
 // WikiGenerator はMarkdown形式のWikiページを生成するエンジン
 type WikiGenerator struct {
-	db            *sqlc.Queries
+	indexingDB    *indexingsqlc.Queries
+	wikiDB        *wikisqlc.Queries
 	llm           wiki.LLMClient
 	searcher      *search.Searcher
 	promptBuilder *PromptBuilder
@@ -27,12 +29,14 @@ type WikiGenerator struct {
 
 // NewWikiGenerator は新しいWikiGeneratorを作成する
 func NewWikiGenerator(
-	db *sqlc.Queries,
+	indexingDB *indexingsqlc.Queries,
+	wikiDB *wikisqlc.Queries,
 	llm wiki.LLMClient,
 	searcher *search.Searcher,
 ) *WikiGenerator {
 	return &WikiGenerator{
-		db:            db,
+		indexingDB:    indexingDB,
+		wikiDB:        wikiDB,
 		llm:           llm,
 		searcher:      searcher,
 		promptBuilder: NewPromptBuilder(),
@@ -53,7 +57,7 @@ func (g *WikiGenerator) GenerateArchitecturePage(
 		return fmt.Errorf("failed to convert productID: %w", err)
 	}
 
-	sources, err := g.db.ListSourcesByProduct(ctx, pgProductID)
+	sources, err := g.indexingDB.ListSourcesByProduct(ctx, pgProductID)
 	if err != nil {
 		return fmt.Errorf("failed to list sources: %w", err)
 	}
@@ -67,7 +71,7 @@ func (g *WikiGenerator) GenerateArchitecturePage(
 	// 2. 各ソースの最新スナップショットを取得
 	var snapshots []pgtype.UUID
 	for _, source := range sources {
-		snapshot, err := g.db.GetLatestIndexedSnapshot(ctx, source.ID)
+		snapshot, err := g.indexingDB.GetLatestIndexedSnapshot(ctx, source.ID)
 		if err != nil {
 			log.Printf("警告: ソース %s の最新スナップショットが見つかりません: %v", source.ID, err)
 			continue
@@ -87,7 +91,7 @@ func (g *WikiGenerator) GenerateArchitecturePage(
 
 	for _, snapshotID := range snapshots {
 		for _, summaryType := range summaryTypes {
-			summary, err := g.db.GetArchitectureSummary(ctx, sqlc.GetArchitectureSummaryParams{
+			summary, err := g.wikiDB.GetArchitectureSummary(ctx, wikisqlc.GetArchitectureSummaryParams{
 				SnapshotID:  snapshotID,
 				SummaryType: summaryType,
 			})
@@ -168,7 +172,7 @@ func (g *WikiGenerator) GenerateDirectoryPage(
 		return fmt.Errorf("failed to convert sourceID: %w", err)
 	}
 
-	snapshot, err := g.db.GetLatestIndexedSnapshot(ctx, pgSourceID)
+	snapshot, err := g.indexingDB.GetLatestIndexedSnapshot(ctx, pgSourceID)
 	if err != nil {
 		return fmt.Errorf("failed to get latest snapshot: %w", err)
 	}
@@ -177,7 +181,7 @@ func (g *WikiGenerator) GenerateDirectoryPage(
 
 	// 2. ディレクトリ要約を取得（優先）
 	var summaryContent string
-	dirSummary, err := g.db.GetDirectorySummaryByPath(ctx, sqlc.GetDirectorySummaryByPathParams{
+	dirSummary, err := g.wikiDB.GetDirectorySummaryByPath(ctx, wikisqlc.GetDirectorySummaryByPathParams{
 		SnapshotID: snapshot.ID,
 		Path:       directoryPath,
 	})

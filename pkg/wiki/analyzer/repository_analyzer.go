@@ -10,8 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	indexingsqlc "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
+	wikisqlc "github.com/jinford/dev-rag/internal/module/wiki/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/indexer/embedder"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	"github.com/jinford/dev-rag/pkg/wiki"
 	"github.com/jinford/dev-rag/pkg/wiki/summarizer"
 	"github.com/jinford/dev-rag/pkg/wiki/types"
@@ -86,7 +87,7 @@ func (a *RepositoryAnalyzer) AnalyzeRepository(ctx context.Context, sourceID, sn
 // かつディレクトリ要約も存在する場合にのみtrueを返す
 func (a *RepositoryAnalyzer) isAlreadyAnalyzed(ctx context.Context, snapshotID uuid.UUID) bool {
 	// 読み取り専用クエリなので、都度 sqlc.New(pool) を使用
-	queries := sqlc.New(a.pool)
+	wikiQueries := wikisqlc.New(a.pool)
 
 	// uuid.UUIDをpgtype.UUIDに変換
 	var pgtypeSnapshotID pgtype.UUID
@@ -96,7 +97,7 @@ func (a *RepositoryAnalyzer) isAlreadyAnalyzed(ctx context.Context, snapshotID u
 	}
 
 	// 4種類のアーキテクチャ要約がすべて揃っているかチェック
-	hasAllArchSummaries, err := queries.HasAllRequiredArchitectureSummaries(ctx, pgtypeSnapshotID)
+	hasAllArchSummaries, err := wikiQueries.HasAllRequiredArchitectureSummaries(ctx, pgtypeSnapshotID)
 	if err != nil {
 		log.Printf("failed to check architecture summaries: %v", err)
 		return false
@@ -107,7 +108,7 @@ func (a *RepositoryAnalyzer) isAlreadyAnalyzed(ctx context.Context, snapshotID u
 	}
 
 	// ディレクトリ要約が存在するかチェック
-	dirSummaryCount, err := queries.CountDirectorySummariesBySnapshot(ctx, pgtypeSnapshotID)
+	dirSummaryCount, err := wikiQueries.CountDirectorySummariesBySnapshot(ctx, pgtypeSnapshotID)
 	if err != nil {
 		log.Printf("failed to count directory summaries: %v", err)
 		return false
@@ -123,7 +124,7 @@ func (a *RepositoryAnalyzer) isAlreadyAnalyzed(ctx context.Context, snapshotID u
 // collectStructure はリポジトリの構造を収集する
 func (a *RepositoryAnalyzer) collectStructure(ctx context.Context, sourceID, snapshotID uuid.UUID) (*types.RepoStructure, error) {
 	// 読み取り専用クエリなので、都度 sqlc.New(pool) を使用
-	queries := sqlc.New(a.pool)
+	indexingQueries := indexingsqlc.New(a.pool)
 
 	structure := &types.RepoStructure{
 		SourceID:    sourceID,
@@ -139,13 +140,13 @@ func (a *RepositoryAnalyzer) collectStructure(ctx context.Context, sourceID, sna
 	}
 
 	// 既存のfilesテーブルから情報を取得
-	files, err := queries.ListFilesBySnapshot(ctx, pgtypeSnapshotID)
+	files, err := indexingQueries.ListFilesBySnapshot(ctx, pgtypeSnapshotID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list files: %w", err)
 	}
 
 	// SecurityFilterでファイルパスをフィルタリング
-	filteredFiles := make([]sqlc.File, 0, len(files))
+	filteredFiles := make([]indexingsqlc.File, 0, len(files))
 	for _, file := range files {
 		if !a.securityFilter.ShouldExclude(file.Path) {
 			filteredFiles = append(filteredFiles, file)

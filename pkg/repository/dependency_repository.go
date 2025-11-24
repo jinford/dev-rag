@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jinford/dev-rag/pkg/sqlc"
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 )
 
 // === Dependency操作 ===

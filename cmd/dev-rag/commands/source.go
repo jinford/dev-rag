@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/urfave/cli/v3"
 
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/indexer"
 	"github.com/jinford/dev-rag/pkg/indexer/chunker"
 	"github.com/jinford/dev-rag/pkg/indexer/detector"
@@ -18,7 +19,6 @@ import (
 	"github.com/jinford/dev-rag/pkg/models"
 	"github.com/jinford/dev-rag/pkg/repository"
 	"github.com/jinford/dev-rag/pkg/repository/txprovider"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	"github.com/jinford/dev-rag/pkg/wiki/analyzer"
 	"github.com/jinford/dev-rag/pkg/wiki/security"
 )

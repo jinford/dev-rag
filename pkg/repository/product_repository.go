@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jinford/dev-rag/pkg/sqlc"
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 )
 
 // ProductRepositoryR はプロダクト集約の読み取り専用リポジトリです

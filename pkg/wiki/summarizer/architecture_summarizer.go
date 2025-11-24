@@ -13,9 +13,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	pgvector "github.com/pgvector/pgvector-go"
 
+	"github.com/jinford/dev-rag/internal/module/wiki/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/indexer/embedder"
 	"github.com/jinford/dev-rag/pkg/repository"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	"github.com/jinford/dev-rag/pkg/wiki"
 	"github.com/jinford/dev-rag/pkg/wiki/types"
 )

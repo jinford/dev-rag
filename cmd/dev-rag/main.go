@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"log"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/jinford/dev-rag/cmd/dev-rag/commands"
+	"github.com/jinford/dev-rag/internal/platform/logger"
 	"github.com/urfave/cli/v3"
 )
 
@@ -16,11 +16,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 構造化ログの設定
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
-	}))
-	slog.SetDefault(logger)
+	// 構造化ログの設定（platform層を使用）
+	_ = logger.New(logger.DefaultConfig())
 
 	app := &cli.Command{
 		Name:  "dev-rag",

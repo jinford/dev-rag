@@ -9,8 +9,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/urfave/cli/v3"
 
+	indexingsqlc "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
+	wikisqlc "github.com/jinford/dev-rag/internal/module/wiki/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/search"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	"github.com/jinford/dev-rag/pkg/wiki/generator"
 )
 
@@ -60,9 +61,10 @@ func WikiGenerateAction(ctx context.Context, cmd *cli.Command) error {
 // executeWikiGeneration はプロダクト単位でWikiページを生成する
 func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName, outputDir string) error {
 	// 1. プロダクトIDを取得
-	queries := sqlc.New(appCtx.Database.Pool)
+	indexingQueries := indexingsqlc.New(appCtx.Database.Pool)
+	wikiQueries := wikisqlc.New(appCtx.Database.Pool)
 
-	product, err := queries.GetProductByName(ctx, productName)
+	product, err := indexingQueries.GetProductByName(ctx, productName)
 	if err != nil {
 		return fmt.Errorf("プロダクト取得に失敗: %w", err)
 	}
@@ -82,7 +84,8 @@ func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName,
 
 	// WikiGeneratorの作成（AppContextのWikiLLMClientを使用）
 	wikiGen := generator.NewWikiGenerator(
-		queries,
+		indexingQueries,
+		wikiQueries,
 		appCtx.WikiLLMClient,
 		searcher,
 	)
@@ -106,7 +109,7 @@ func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName,
 		return fmt.Errorf("productIDの変換に失敗: %w", err)
 	}
 
-	sources, err := queries.ListSourcesByProduct(ctx, pgtypeProductID)
+	sources, err := indexingQueries.ListSourcesByProduct(ctx, pgtypeProductID)
 	if err != nil {
 		return fmt.Errorf("ソース一覧取得に失敗: %w", err)
 	}
@@ -126,14 +129,14 @@ func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName,
 		}
 
 		// 最新スナップショットを取得
-		snapshot, err := queries.GetLatestIndexedSnapshot(ctx, source.ID)
+		snapshot, err := indexingQueries.GetLatestIndexedSnapshot(ctx, source.ID)
 		if err != nil {
 			slog.Warn("最新スナップショットが見つかりません", "sourceID", sourceID, "error", err)
 			continue
 		}
 
 		// ディレクトリサマリー一覧を取得
-		dirSummaries, err := queries.ListDirectorySummariesBySnapshot(ctx, snapshot.ID)
+		dirSummaries, err := wikiQueries.ListDirectorySummariesBySnapshot(ctx, snapshot.ID)
 		if err != nil {
 			slog.Warn("ディレクトリサマリー取得に失敗しました", "snapshotID", snapshot.ID, "error", err)
 			continue

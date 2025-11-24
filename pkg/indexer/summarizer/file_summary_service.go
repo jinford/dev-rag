@@ -83,7 +83,7 @@ func (s *FileSummaryService) GenerateAndSaveFileSummary(
 
 	// 5. file_summariesテーブルにUPSERT（冪等性保証）
 	_, err = txprovider.Transact(ctx, s.txProvider, func(adapters *txprovider.Adapter) (struct{}, error) {
-		_, err := adapters.Index.UpsertFileSummary(ctx, fileID, summaryText, embedding, metadataJSON)
+		_, err := adapters.Wiki.UpsertFileSummary(ctx, fileID, summaryText, embedding, metadataJSON)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("failed to upsert file summary: %w", err)
 		}

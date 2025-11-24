@@ -9,11 +9,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/db"
 	"github.com/jinford/dev-rag/pkg/indexer/embedder"
 	"github.com/jinford/dev-rag/pkg/models"
 	"github.com/jinford/dev-rag/pkg/repository"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 )
 
 const (

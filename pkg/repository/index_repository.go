@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/models"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 	pgvector "github.com/pgvector/pgvector-go"
 )
 
@@ -787,46 +787,3 @@ func (rw *IndexRepositoryRW) BatchUpdateChunkImportanceScores(ctx context.Contex
 	return nil
 }
 
-// === File Summary 操作 ===
-
-// UpsertFileSummary はファイルサマリーをUPSERTします（冪等性保証）
-func (rw *IndexRepositoryRW) UpsertFileSummary(
-	ctx context.Context,
-	fileID uuid.UUID,
-	summary string,
-	embedding []float32,
-	metadataJSON []byte,
-) (*models.FileSummary, error) {
-	// pgvectorベクトルに変換
-	vec := pgvector.NewVector(embedding)
-
-	fileSummary, err := rw.q.UpsertFileSummary(ctx, sqlc.UpsertFileSummaryParams{
-		FileID:    UUIDToPgtype(fileID),
-		Summary:   summary,
-		Embedding: vec,
-		Metadata:  metadataJSON,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to upsert file summary: %w", err)
-	}
-
-	return convertSQLCFileSummary(fileSummary), nil
-}
-
-func convertSQLCFileSummary(row sqlc.FileSummary) *models.FileSummary {
-	// pgvectorからfloat32スライスに変換
-	embedding := make([]float32, len(row.Embedding.Slice()))
-	for i, v := range row.Embedding.Slice() {
-		embedding[i] = v
-	}
-
-	return &models.FileSummary{
-		ID:        PgtypeToUUID(row.ID),
-		FileID:    PgtypeToUUID(row.FileID),
-		Summary:   row.Summary,
-		Embedding: embedding,
-		Metadata:  row.Metadata,
-		CreatedAt: PgtypeToTime(row.CreatedAt),
-		UpdatedAt: PgtypeToTime(row.UpdatedAt),
-	}
-}

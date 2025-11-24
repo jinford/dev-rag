@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
 	"github.com/jinford/dev-rag/pkg/models"
-	"github.com/jinford/dev-rag/pkg/sqlc"
 )
 
 // SourceRepositoryR はソース集約に対する読み取り専用のデータベース操作を提供します
