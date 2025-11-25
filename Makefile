@@ -168,8 +168,8 @@ fmt:
 # sqlcでコード生成
 sqlc-generate:
 	@echo "SQLクエリからGoコードを生成中..."
-	@go tool sqlc generate
-	@echo "✓ コード生成完了: internal/module/*/adapter/pg/sqlc/"
+	@go tool sqlc generate -f internal/infra/postgres/sqlc.yaml
+	@echo "✓ コード生成完了: internal/infra/postgres/{sqlc,searchsqlc,wikisqlc}"
 
 # ビルド + テスト
 all: build test
