@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jinford/dev-rag/internal/core/indexing"
+	"github.com/jinford/dev-rag/internal/core/ingestion"
 	"github.com/jinford/dev-rag/internal/infra/git/filter"
 )
 
-// Provider は Git ソース用の indexing.SourceProvider 実装
+// Provider は Git ソース用の ingestion.SourceProvider 実装
 type Provider struct {
 	client          *Client
 	gitCloneBaseDir string
@@ -27,9 +27,9 @@ func NewProvider(client *Client, gitCloneBaseDir, defaultBranch string) *Provide
 	}
 }
 
-// GetSourceType は indexing.SourceTypeGit を返す
-func (p *Provider) GetSourceType() indexing.SourceType {
-	return indexing.SourceTypeGit
+// GetSourceType は ingestion.SourceTypeGit を返す
+func (p *Provider) GetSourceType() ingestion.SourceType {
+	return ingestion.SourceTypeGit
 }
 
 // ExtractSourceName は Git URL からソース名を抽出する
@@ -46,7 +46,7 @@ func (p *Provider) ExtractSourceName(identifier string) string {
 }
 
 // FetchDocuments は Git リポジトリからドキュメント一覧を取得する
-func (p *Provider) FetchDocuments(ctx context.Context, params indexing.IndexParams) ([]*indexing.SourceDocument, string, error) {
+func (p *Provider) FetchDocuments(ctx context.Context, params ingestion.IndexParams) ([]*ingestion.SourceDocument, string, error) {
 	// オプションから ref を取得
 	ref, ok := params.Options["ref"].(string)
 	if !ok || ref == "" {
@@ -90,8 +90,8 @@ func (p *Provider) FetchDocuments(ctx context.Context, params indexing.IndexPara
 	}
 	p.ignoreFilter = ignoreFilter
 
-	// indexing.SourceDocument 形式に変換
-	var documents []*indexing.SourceDocument
+	// ingestion.SourceDocument 形式に変換
+	var documents []*ingestion.SourceDocument
 	for _, fileInfo := range files {
 		// ファイル内容を読み込み
 		content, err := p.client.ReadFile(ctx, repoPath, ref, fileInfo.Path)
@@ -107,7 +107,7 @@ func (p *Provider) FetchDocuments(ctx context.Context, params indexing.IndexPara
 			fileCommit = commitInfo
 		}
 
-		documents = append(documents, &indexing.SourceDocument{
+		documents = append(documents, &ingestion.SourceDocument{
 			Path:        fileInfo.Path,
 			Content:     content,
 			Size:        fileInfo.Size,
@@ -123,8 +123,8 @@ func (p *Provider) FetchDocuments(ctx context.Context, params indexing.IndexPara
 }
 
 // CreateMetadata は Git ソース用のメタデータを作成する
-func (p *Provider) CreateMetadata(params indexing.IndexParams) indexing.SourceMetadata {
-	metadata := indexing.SourceMetadata{
+func (p *Provider) CreateMetadata(params ingestion.IndexParams) ingestion.SourceMetadata {
+	metadata := ingestion.SourceMetadata{
 		"url": params.Identifier,
 	}
 
@@ -144,7 +144,7 @@ func (p *Provider) CreateMetadata(params indexing.IndexParams) indexing.SourceMe
 }
 
 // ShouldIgnore はドキュメントを除外すべきかを判定する
-func (p *Provider) ShouldIgnore(doc *indexing.SourceDocument) bool {
+func (p *Provider) ShouldIgnore(doc *ingestion.SourceDocument) bool {
 	if p.ignoreFilter == nil {
 		return false
 	}

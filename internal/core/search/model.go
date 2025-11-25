@@ -42,3 +42,47 @@ type ChunkContext struct {
 	// 階層関係
 	Level int `json:"level"`
 }
+
+// SummarySearchResult は要約検索の結果を表す
+type SummarySearchResult struct {
+	SummaryID   uuid.UUID `json:"summaryID"`
+	SummaryType string    `json:"summaryType"` // "file" | "directory" | "architecture"
+	TargetPath  string    `json:"targetPath"`
+	ArchType    *string   `json:"archType,omitempty"`
+	Content     string    `json:"content"`
+	Score       float64   `json:"score"`
+}
+
+// SummarySearchFilter は要約検索時のフィルタ
+type SummarySearchFilter struct {
+	SummaryTypes []string // フィルタする要約タイプ（空なら全て）
+	PathPrefix   *string  // パスプレフィックスでフィルタ
+}
+
+// HybridSearchResult はハイブリッド検索の結果
+type HybridSearchResult struct {
+	Chunks    []*SearchResult        `json:"chunks"`
+	Summaries []*SummarySearchResult `json:"summaries"`
+}
+
+// HybridSearchParams はハイブリッド検索のパラメータ
+// ProductIDとSnapshotIDの使い分け:
+// - ProductID が指定された場合: そのプロダクトに属する全スナップショットを横断検索
+// - ProductID が nil の場合: SnapshotID で指定された単一スナップショットのみを検索
+type HybridSearchParams struct {
+	ProductID     *uuid.UUID // プロダクト横断検索用（nilの場合はSnapshotID検索）
+	SnapshotID    uuid.UUID  // 単一スナップショット検索用
+	Query         string
+	ChunkLimit    int
+	SummaryLimit  int
+	ChunkFilter   *SearchFilter
+	SummaryFilter *SummarySearchFilter
+}
+
+// SummarySearchParams は要約検索のパラメータ
+type SummarySearchParams struct {
+	SnapshotID uuid.UUID
+	Query      string
+	Limit      int
+	Filter     *SummarySearchFilter
+}

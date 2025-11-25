@@ -75,6 +75,32 @@ func (r *SearchRepository) SearchBySource(ctx context.Context, sourceID uuid.UUI
 	return results, nil
 }
 
+func (r *SearchRepository) SearchChunksBySnapshot(ctx context.Context, snapshotID uuid.UUID, queryVector []float32, limit int, filters search.SearchFilter) ([]*search.SearchResult, error) {
+	rows, err := r.q.SearchChunksBySnapshot(ctx, sqlc.SearchChunksBySnapshotParams{
+		QueryVector: pgvector.NewVector(queryVector),
+		SnapshotID:  UUIDToPgtype(snapshotID),
+		PathPrefix:  StringPtrToPgtext(filters.PathPrefix),
+		ContentType: StringPtrToPgtext(filters.ContentType),
+		LimitVal:    int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search chunks by snapshot: %w", err)
+	}
+
+	results := make([]*search.SearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, &search.SearchResult{
+			ChunkID:   PgtypeToUUID(row.ChunkID),
+			FilePath:  row.Path,
+			StartLine: int(row.StartLine),
+			EndLine:   int(row.EndLine),
+			Content:   row.Content,
+			Score:     row.Score,
+		})
+	}
+	return results, nil
+}
+
 func (r *SearchRepository) GetChunkContext(ctx context.Context, chunkID uuid.UUID, beforeCount int, afterCount int) ([]*search.ChunkContext, error) {
 	target, err := r.q.GetChunk(ctx, UUIDToPgtype(chunkID))
 	if err != nil {
@@ -163,6 +189,80 @@ func (r *SearchRepository) GetChunkTree(ctx context.Context, rootID uuid.UUID, m
 	}
 
 	return result, nil
+}
+
+func (r *SearchRepository) SearchChunksByProduct(ctx context.Context, productID uuid.UUID, queryVector []float32, limit int, filters search.SearchFilter) ([]*search.SearchResult, error) {
+	return r.SearchByProduct(ctx, productID, queryVector, limit, filters)
+}
+
+func (r *SearchRepository) SearchSummariesBySnapshot(ctx context.Context, snapshotID uuid.UUID, queryVector []float32, limit int, filters search.SummarySearchFilter) ([]*search.SummarySearchResult, error) {
+	// summary_typesの準備
+	summaryTypes := filters.SummaryTypes
+	if summaryTypes == nil {
+		summaryTypes = []string{}
+	}
+
+	// path_prefixの準備
+	pathPrefix := ""
+	if filters.PathPrefix != nil {
+		pathPrefix = *filters.PathPrefix
+	}
+
+	rows, err := r.q.SearchSummariesBySnapshot(ctx, sqlc.SearchSummariesBySnapshotParams{
+		QueryVector:  pgvector.NewVector(queryVector),
+		SnapshotID:   UUIDToPgtype(snapshotID),
+		SummaryTypes: summaryTypes,
+		PathPrefix:   pathPrefix,
+		LimitVal:     int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search summaries by snapshot: %w", err)
+	}
+
+	results := make([]*search.SummarySearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, &search.SummarySearchResult{
+			SummaryID:   PgtypeToUUID(row.ID),
+			SummaryType: row.SummaryType,
+			TargetPath:  row.TargetPath,
+			ArchType:    PgtextToStringPtr(row.ArchType),
+			Content:     row.Content,
+			Score:       float64(row.Score),
+		})
+	}
+	return results, nil
+}
+
+func (r *SearchRepository) SearchSummariesByProduct(ctx context.Context, productID uuid.UUID, queryVector []float32, limit int, filters search.SummarySearchFilter) ([]*search.SummarySearchResult, error) {
+	// summary_typesの準備
+	summaryTypes := filters.SummaryTypes
+	if summaryTypes == nil {
+		summaryTypes = []string{}
+	}
+
+	rows, err := r.q.SearchSummariesByProduct(ctx, sqlc.SearchSummariesByProductParams{
+		QueryVector:  pgvector.NewVector(queryVector),
+		ProductID:    UUIDToPgtype(productID),
+		SummaryTypes: summaryTypes,
+		PathPrefix:   StringPtrToPgtext(filters.PathPrefix),
+		LimitVal:     int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to search summaries by product: %w", err)
+	}
+
+	results := make([]*search.SummarySearchResult, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, &search.SummarySearchResult{
+			SummaryID:   PgtypeToUUID(row.ID),
+			SummaryType: row.SummaryType,
+			TargetPath:  row.TargetPath,
+			ArchType:    PgtextToStringPtr(row.ArchType),
+			Content:     row.Content,
+			Score:       float64(row.Score),
+		})
+	}
+	return results, nil
 }
 
 // convertSearchChunk は searchsqlc.Chunk を search.ChunkContext に変換する。

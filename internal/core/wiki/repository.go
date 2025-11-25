@@ -27,3 +27,9 @@ type Repository interface {
 	GetSourceInfo(ctx context.Context, sourceID uuid.UUID) (*SourceInfo, error)
 	GetSnapshotInfo(ctx context.Context, snapshotID uuid.UUID) (*SnapshotInfo, error)
 }
+
+// FileReader はソースファイルを読み取るインターフェース
+type FileReader interface {
+	// ReadFile は指定されたパスのファイル内容を読み取る
+	ReadFile(ctx context.Context, snapshotID uuid.UUID, filePath string) (string, error)
+}

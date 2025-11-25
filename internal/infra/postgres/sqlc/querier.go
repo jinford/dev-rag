@@ -15,6 +15,8 @@ type Querier interface {
 	CountChildChunks(ctx context.Context, parentChunkID pgtype.UUID) (int64, error)
 	// 指定日数以上古いチャンクの数を取得
 	CountStaleChunks(ctx context.Context, dollar_1 interface{}) (int64, error)
+	CountSummariesByType(ctx context.Context, arg CountSummariesByTypeParams) (int64, error)
+	CountSummaryEmbeddingsBySnapshot(ctx context.Context, snapshotID pgtype.UUID) (int64, error)
 	CreateChunk(ctx context.Context, arg CreateChunkParams) (Chunk, error)
 	CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error)
 	CreateDependency(ctx context.Context, arg CreateDependencyParams) error
@@ -28,6 +30,9 @@ type Querier interface {
 	CreateSource(ctx context.Context, arg CreateSourceParams) (Source, error)
 	CreateSourceIfNotExists(ctx context.Context, arg CreateSourceIfNotExistsParams) (Source, error)
 	CreateSourceSnapshot(ctx context.Context, arg CreateSourceSnapshotParams) (SourceSnapshot, error)
+	CreateSummary(ctx context.Context, arg CreateSummaryParams) (Summary, error)
+	CreateSummaryEmbedding(ctx context.Context, arg CreateSummaryEmbeddingParams) (SummaryEmbedding, error)
+	CreateWikiMetadata(ctx context.Context, arg CreateWikiMetadataParams) (WikiMetadatum, error)
 	DeleteChunk(ctx context.Context, id pgtype.UUID) error
 	DeleteChunkHierarchyByChild(ctx context.Context, childChunkID pgtype.UUID) error
 	DeleteChunkHierarchyByParent(ctx context.Context, parentChunkID pgtype.UUID) error
@@ -41,9 +46,15 @@ type Querier interface {
 	DeleteProduct(ctx context.Context, id pgtype.UUID) error
 	DeleteSource(ctx context.Context, id pgtype.UUID) error
 	DeleteSourceSnapshot(ctx context.Context, id pgtype.UUID) error
+	DeleteSummariesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) error
+	DeleteSummary(ctx context.Context, id pgtype.UUID) error
+	DeleteSummaryEmbedding(ctx context.Context, summaryID pgtype.UUID) error
+	DeleteSummaryEmbeddingsBySnapshot(ctx context.Context, snapshotID pgtype.UUID) error
+	DeleteWikiMetadata(ctx context.Context, id pgtype.UUID) error
 	FindChunksByContentHash(ctx context.Context, contentHash string) ([]Chunk, error)
 	FindFilesByContentHash(ctx context.Context, contentHash string) ([]File, error)
 	GetAllDependencies(ctx context.Context) ([]ChunkDependency, error)
+	GetArchitectureSummary(ctx context.Context, arg GetArchitectureSummaryParams) (Summary, error)
 	GetChildChunkIDs(ctx context.Context, parentChunkID pgtype.UUID) ([]pgtype.UUID, error)
 	GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error)
 	GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error)
@@ -53,6 +64,7 @@ type Querier interface {
 	GetDependenciesByChunk(ctx context.Context, fromChunkID pgtype.UUID) ([]ChunkDependency, error)
 	GetDependenciesByChunkAndType(ctx context.Context, arg GetDependenciesByChunkAndTypeParams) ([]ChunkDependency, error)
 	GetDependencyCount(ctx context.Context, fromChunkID pgtype.UUID) (int64, error)
+	GetDirectorySummary(ctx context.Context, arg GetDirectorySummaryParams) (Summary, error)
 	// ドメイン別のファイル数とチャンク数を集計
 	GetDomainCoverageBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageBySnapshotRow, error)
 	GetDomainCoverageStats(ctx context.Context, snapshotID pgtype.UUID) ([]GetDomainCoverageStatsRow, error)
@@ -60,6 +72,7 @@ type Querier interface {
 	GetFile(ctx context.Context, id pgtype.UUID) (File, error)
 	GetFileByPath(ctx context.Context, arg GetFileByPathParams) (File, error)
 	GetFileHashesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]GetFileHashesBySnapshotRow, error)
+	GetFileSummary(ctx context.Context, arg GetFileSummaryParams) (Summary, error)
 	// 指定したドメインのファイル一覧を取得
 	GetFilesByDomain(ctx context.Context, arg GetFilesByDomainParams) ([]File, error)
 	GetGitRef(ctx context.Context, id pgtype.UUID) (GitRef, error)
@@ -67,6 +80,7 @@ type Querier interface {
 	GetIncomingDependenciesByChunk(ctx context.Context, toChunkID pgtype.UUID) ([]ChunkDependency, error)
 	GetIncomingDependencyCount(ctx context.Context, toChunkID pgtype.UUID) (int64, error)
 	GetLatestIndexedSnapshot(ctx context.Context, sourceID pgtype.UUID) (SourceSnapshot, error)
+	GetMaxDirectoryDepth(ctx context.Context, snapshotID pgtype.UUID) (int32, error)
 	GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) (Chunk, error)
 	GetParentChunkID(ctx context.Context, childChunkID pgtype.UUID) (pgtype.UUID, error)
 	GetProduct(ctx context.Context, id pgtype.UUID) (Product, error)
@@ -78,11 +92,19 @@ type Querier interface {
 	GetSourceSnapshotByVersion(ctx context.Context, arg GetSourceSnapshotByVersionParams) (SourceSnapshot, error)
 	// 指定日数以上古いチャンクを取得
 	GetStaleChunks(ctx context.Context, dollar_1 interface{}) ([]GetStaleChunksRow, error)
+	GetSummaryByID(ctx context.Context, id pgtype.UUID) (Summary, error)
+	GetSummaryEmbedding(ctx context.Context, summaryID pgtype.UUID) (SummaryEmbedding, error)
 	GetUnindexedImportantFiles(ctx context.Context, snapshotID pgtype.UUID) ([]string, error)
+	GetWikiMetadata(ctx context.Context, id pgtype.UUID) (WikiMetadatum, error)
+	GetWikiMetadataByProduct(ctx context.Context, productID pgtype.UUID) (WikiMetadatum, error)
 	HasChildren(ctx context.Context, parentChunkID pgtype.UUID) (bool, error)
 	HasParent(ctx context.Context, childChunkID pgtype.UUID) (bool, error)
+	ListArchitectureSummariesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]Summary, error)
 	ListChunksByFile(ctx context.Context, fileID pgtype.UUID) ([]Chunk, error)
 	ListChunksByOrdinalRange(ctx context.Context, arg ListChunksByOrdinalRangeParams) ([]Chunk, error)
+	ListDirectorySummariesByDepth(ctx context.Context, arg ListDirectorySummariesByDepthParams) ([]Summary, error)
+	ListDirectorySummariesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]Summary, error)
+	ListFileSummariesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]Summary, error)
 	ListFilesByContentType(ctx context.Context, arg ListFilesByContentTypeParams) ([]File, error)
 	ListFilesBySnapshot(ctx context.Context, snapshotID pgtype.UUID) ([]File, error)
 	ListGitRefsBySource(ctx context.Context, sourceID pgtype.UUID) ([]GitRef, error)
@@ -92,16 +114,27 @@ type Querier interface {
 	ListSourceSnapshotsBySource(ctx context.Context, sourceID pgtype.UUID) ([]SourceSnapshot, error)
 	ListSourcesByProduct(ctx context.Context, productID pgtype.UUID) ([]Source, error)
 	ListSourcesByType(ctx context.Context, sourceType string) ([]Source, error)
+	ListSummariesByType(ctx context.Context, arg ListSummariesByTypeParams) ([]Summary, error)
+	ListWikiMetadata(ctx context.Context) ([]WikiMetadatum, error)
 	MarkSnapshotIndexed(ctx context.Context, id pgtype.UUID) (SourceSnapshot, error)
 	RemoveChunkRelation(ctx context.Context, arg RemoveChunkRelationParams) error
+	SearchArchitectureSummaryEmbeddings(ctx context.Context, arg SearchArchitectureSummaryEmbeddingsParams) ([]SearchArchitectureSummaryEmbeddingsRow, error)
 	SearchChunksByProduct(ctx context.Context, arg SearchChunksByProductParams) ([]SearchChunksByProductRow, error)
+	SearchChunksBySnapshot(ctx context.Context, arg SearchChunksBySnapshotParams) ([]SearchChunksBySnapshotRow, error)
 	SearchChunksBySource(ctx context.Context, arg SearchChunksBySourceParams) ([]SearchChunksBySourceRow, error)
+	SearchDirectorySummaryEmbeddings(ctx context.Context, arg SearchDirectorySummaryEmbeddingsParams) ([]SearchDirectorySummaryEmbeddingsRow, error)
+	SearchFileSummaryEmbeddings(ctx context.Context, arg SearchFileSummaryEmbeddingsParams) ([]SearchFileSummaryEmbeddingsRow, error)
 	SearchSimilarChunks(ctx context.Context, arg SearchSimilarChunksParams) ([]SearchSimilarChunksRow, error)
+	SearchSummariesByProduct(ctx context.Context, arg SearchSummariesByProductParams) ([]SearchSummariesByProductRow, error)
+	SearchSummariesBySnapshot(ctx context.Context, arg SearchSummariesBySnapshotParams) ([]SearchSummariesBySnapshotRow, error)
+	SearchSummaryEmbeddings(ctx context.Context, arg SearchSummaryEmbeddingsParams) ([]SearchSummaryEmbeddingsRow, error)
 	UpdateChunkImportanceScore(ctx context.Context, arg UpdateChunkImportanceScoreParams) error
 	UpdateGitRef(ctx context.Context, arg UpdateGitRefParams) (GitRef, error)
 	UpdateProduct(ctx context.Context, arg UpdateProductParams) (Product, error)
 	UpdateSnapshotFileIndexed(ctx context.Context, arg UpdateSnapshotFileIndexedParams) error
 	UpdateSource(ctx context.Context, arg UpdateSourceParams) (Source, error)
+	UpdateSummary(ctx context.Context, arg UpdateSummaryParams) (Summary, error)
+	UpsertSummaryEmbedding(ctx context.Context, arg UpsertSummaryEmbeddingParams) (SummaryEmbedding, error)
 }
 
 var _ Querier = (*Queries)(nil)

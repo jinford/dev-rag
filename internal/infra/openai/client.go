@@ -2,7 +2,6 @@ package openai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -106,49 +105,29 @@ func (c *Client) ModelName() string {
 }
 
 // GenerateCompletion は OpenAI API を使用してテキストを生成する
-func (c *Client) GenerateCompletion(ctx context.Context, req wiki.CompletionRequest) (wiki.CompletionResponse, error) {
+func (c *Client) GenerateCompletion(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	model := c.model
-	if req.Model != "" {
-		model = req.Model
+	content, err := c.generateWithRetry(ctx, c.model, prompt)
+	if err != nil {
+		return "", err
 	}
 
-	var jsonParseRetries int
-	for {
-		resp, err := c.generateWithRetry(ctx, model, req)
-		if err != nil {
-			return wiki.CompletionResponse{}, err
-		}
-
-		if req.ResponseFormat == "json" {
-			if !isValidJSON(resp.Content) {
-				jsonParseRetries++
-				if jsonParseRetries > JSONParseMaxRetries {
-					return wiki.CompletionResponse{}, fmt.Errorf("%w: JSON parse failed after %d retries", ErrInvalidResponseFormat, JSONParseMaxRetries)
-				}
-				continue
-			}
-		}
-
-		return resp, nil
-	}
+	return content, nil
 }
 
-func (c *Client) generateWithRetry(ctx context.Context, model string, req wiki.CompletionRequest) (wiki.CompletionResponse, error) {
+func (c *Client) generateWithRetry(ctx context.Context, model string, prompt string) (string, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= MaxRetries; attempt++ {
 		if attempt > 0 {
 			backoffDuration := time.Duration(math.Pow(2, float64(attempt-1))) * BaseBackoff
-			if backoffDuration > MaxBackoff {
-				backoffDuration = MaxBackoff
-			}
+			backoffDuration = min(backoffDuration, MaxBackoff)
 
 			select {
 			case <-ctx.Done():
-				return wiki.CompletionResponse{}, ctx.Err()
+				return "", ctx.Err()
 			case <-time.After(backoffDuration):
 			}
 		}
@@ -156,21 +135,9 @@ func (c *Client) generateWithRetry(ctx context.Context, model string, req wiki.C
 		params := openai.ChatCompletionNewParams{
 			Model: shared.ChatModel(model),
 			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.UserMessage(req.Prompt),
+				openai.UserMessage(prompt),
 			},
-			Temperature: openai.Float(req.Temperature),
-		}
-
-		if req.MaxTokens > 0 {
-			params.MaxTokens = openai.Int(int64(req.MaxTokens))
-		}
-
-		if req.ResponseFormat == "json" {
-			params.ResponseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-				OfJSONObject: &shared.ResponseFormatJSONObjectParam{
-					Type: "json_object",
-				},
-			}
+			Temperature: openai.Float(0.7),
 		}
 
 		completion, err := c.client.Chat.Completions.New(ctx, params)
@@ -181,24 +148,19 @@ func (c *Client) generateWithRetry(ctx context.Context, model string, req wiki.C
 				continue
 			}
 
-			return wiki.CompletionResponse{}, fmt.Errorf("OpenAI API call failed: %w", err)
+			return "", fmt.Errorf("OpenAI API call failed: %w", err)
 		}
 
 		if len(completion.Choices) == 0 {
-			return wiki.CompletionResponse{}, fmt.Errorf("no completion choices returned")
+			return "", fmt.Errorf("no completion choices returned")
 		}
 
 		content := completion.Choices[0].Message.Content
-		tokensUsed := int(completion.Usage.TotalTokens)
 
-		return wiki.CompletionResponse{
-			Content:    content,
-			TokensUsed: tokensUsed,
-			Model:      string(completion.Model),
-		}, nil
+		return content, nil
 	}
 
-	return wiki.CompletionResponse{}, fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
+	return "", fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
 }
 
 func isRateLimitError(err error) bool {
@@ -214,10 +176,5 @@ func isRateLimitError(err error) bool {
 	return false
 }
 
-func isValidJSON(s string) bool {
-	var js json.RawMessage
-	return json.Unmarshal([]byte(s), &js) == nil
-}
-
 // インターフェース実装の確認
-var _ wiki.Client = (*Client)(nil)
+var _ wiki.LLMClient = (*Client)(nil)

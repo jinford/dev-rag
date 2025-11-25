@@ -6,7 +6,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	coreindexing "github.com/jinford/dev-rag/internal/core/indexing"
+	coreingestion "github.com/jinford/dev-rag/internal/core/ingestion"
 )
 
 // SourceListAction はソース一覧を表示するコマンドのアクション
@@ -87,11 +87,11 @@ func executeGitIndexing(ctx context.Context, appCtx *AppContext, repoURL, produc
 	// 1. インデックス化を実行
 	slog.Info("インデックス化を開始します", "url", repoURL, "product", productName)
 
-	params := coreindexing.IndexParams{
+	params := coreingestion.IndexParams{
 		Identifier:  repoURL,
 		ProductName: productName,
 		ForceInit:   forceInit,
-		Options: map[string]interface{}{
+		Options: map[string]any{
 			"ref": ref,
 		},
 	}

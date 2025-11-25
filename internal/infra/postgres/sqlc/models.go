@@ -315,6 +315,35 @@ type SourceSnapshot struct {
 	CreatedAt pgtype.Timestamp `json:"created_at"`
 }
 
+// 階層的要約（ファイル/ディレクトリ/アーキテクチャ）
+type Summary struct {
+	ID         pgtype.UUID `json:"id"`
+	SnapshotID pgtype.UUID `json:"snapshot_id"`
+	// 要約の種類（file/directory/architecture）
+	SummaryType string `json:"summary_type"`
+	// 対象パス（ファイルパス/ディレクトリパス、architectureは空文字）
+	TargetPath string      `json:"target_path"`
+	Depth      pgtype.Int4 `json:"depth"`
+	ParentPath pgtype.Text `json:"parent_path"`
+	ArchType   pgtype.Text `json:"arch_type"`
+	Content    string      `json:"content"`
+	// 要約内容のハッシュ
+	ContentHash string `json:"content_hash"`
+	// 入力データのハッシュ（差分検知用）
+	SourceHash string           `json:"source_hash"`
+	Metadata   []byte           `json:"metadata"`
+	CreatedAt  pgtype.Timestamp `json:"created_at"`
+	UpdatedAt  pgtype.Timestamp `json:"updated_at"`
+}
+
+// 要約のEmbeddingベクトル
+type SummaryEmbedding struct {
+	SummaryID pgtype.UUID        `json:"summary_id"`
+	Vector    pgvector_go.Vector `json:"vector"`
+	Model     string             `json:"model"`
+	CreatedAt pgtype.Timestamp   `json:"created_at"`
+}
+
 // Wiki生成の実行履歴とメタデータ（プロダクト単位のみ）
 type WikiMetadatum struct {
 	// Wiki生成レコードの一意識別子

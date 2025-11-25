@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jinford/dev-rag/internal/core/indexing"
+	"github.com/jinford/dev-rag/internal/core/ingestion"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 )
@@ -97,12 +97,12 @@ func (e *Embedder) Dimension() int {
 }
 
 // Metadata はモデル情報を返す
-func (e *Embedder) Metadata() indexing.Metadata {
-	return indexing.Metadata{
+func (e *Embedder) Metadata() ingestion.Metadata {
+	return ingestion.Metadata{
 		ModelName: e.model,
 		Dimension: e.dimension,
 	}
 }
 
 // インターフェース実装の確認
-var _ indexing.Embedder = (*Embedder)(nil)
+var _ ingestion.Embedder = (*Embedder)(nil)

@@ -139,6 +139,74 @@ func (q *Queries) SearchChunksByProduct(ctx context.Context, arg SearchChunksByP
 	return items, nil
 }
 
+const searchChunksBySnapshot = `-- name: SearchChunksBySnapshot :many
+SELECT
+    c.id AS chunk_id,
+    f.path,
+    c.start_line,
+    c.end_line,
+    c.content,
+    (1 - (e.vector <=> $1::vector))::float8 AS score
+FROM chunks c
+JOIN files f ON c.file_id = f.id
+JOIN embeddings e ON c.id = e.chunk_id
+WHERE f.snapshot_id = $2
+  AND ($3::text IS NULL OR f.path LIKE $3::text || '%')
+  AND ($4::text IS NULL OR f.content_type = $4::text)
+ORDER BY e.vector <=> $1::vector
+LIMIT $5
+`
+
+type SearchChunksBySnapshotParams struct {
+	QueryVector pgvector_go.Vector `json:"query_vector"`
+	SnapshotID  pgtype.UUID        `json:"snapshot_id"`
+	PathPrefix  pgtype.Text        `json:"path_prefix"`
+	ContentType pgtype.Text        `json:"content_type"`
+	LimitVal    int32              `json:"limit_val"`
+}
+
+type SearchChunksBySnapshotRow struct {
+	ChunkID   pgtype.UUID `json:"chunk_id"`
+	Path      string      `json:"path"`
+	StartLine int32       `json:"start_line"`
+	EndLine   int32       `json:"end_line"`
+	Content   string      `json:"content"`
+	Score     float64     `json:"score"`
+}
+
+func (q *Queries) SearchChunksBySnapshot(ctx context.Context, arg SearchChunksBySnapshotParams) ([]SearchChunksBySnapshotRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksBySnapshot,
+		arg.QueryVector,
+		arg.SnapshotID,
+		arg.PathPrefix,
+		arg.ContentType,
+		arg.LimitVal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchChunksBySnapshotRow{}
+	for rows.Next() {
+		var i SearchChunksBySnapshotRow
+		if err := rows.Scan(
+			&i.ChunkID,
+			&i.Path,
+			&i.StartLine,
+			&i.EndLine,
+			&i.Content,
+			&i.Score,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchChunksBySource = `-- name: SearchChunksBySource :many
 WITH latest_snapshot AS (
     SELECT id

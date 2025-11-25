@@ -14,6 +14,18 @@ type Repository interface {
 	// SearchBySource はソース内でベクトル検索を実行する
 	SearchBySource(ctx context.Context, sourceID uuid.UUID, queryVector []float32, limit int, filters SearchFilter) ([]*SearchResult, error)
 
+	// SearchChunksBySnapshot はスナップショット内でチャンク検索を実行する
+	SearchChunksBySnapshot(ctx context.Context, snapshotID uuid.UUID, queryVector []float32, limit int, filters SearchFilter) ([]*SearchResult, error)
+
+	// SearchChunksByProduct はプロダクト横断でチャンク検索を実行する（HybridSearch用）
+	SearchChunksByProduct(ctx context.Context, productID uuid.UUID, queryVector []float32, limit int, filters SearchFilter) ([]*SearchResult, error)
+
+	// SearchSummariesBySnapshot はスナップショット内で要約検索を実行する
+	SearchSummariesBySnapshot(ctx context.Context, snapshotID uuid.UUID, queryVector []float32, limit int, filters SummarySearchFilter) ([]*SummarySearchResult, error)
+
+	// SearchSummariesByProduct はプロダクト横断で要約検索を実行する（HybridSearch用）
+	SearchSummariesByProduct(ctx context.Context, productID uuid.UUID, queryVector []float32, limit int, filters SummarySearchFilter) ([]*SummarySearchResult, error)
+
 	// GetChunkContext は対象チャンクの前後コンテキストを取得する
 	GetChunkContext(ctx context.Context, chunkID uuid.UUID, beforeCount int, afterCount int) ([]*ChunkContext, error)
 

@@ -3,46 +3,37 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/urfave/cli/v3"
+
+	corewiki "github.com/jinford/dev-rag/internal/core/wiki"
 )
 
 // WikiGenerateAction はプロダクト単位でWikiを生成するコマンドのアクション
 func WikiGenerateAction(ctx context.Context, cmd *cli.Command) error {
-	// TODO: 新しい WikiService を使った実装に置き換える
-	// 現在の実装は古い application.NewWikiGenerator を使用しているため、一時的に無効化
-	return fmt.Errorf("wiki generate command is temporarily disabled during refactoring")
-
-	/*
 	product := cmd.String("product")
 	out := cmd.String("out")
-	configFile := cmd.String("config")
 	envFile := cmd.String("env")
 
 	slog.Info("Wiki生成を開始",
 		"product", product,
 		"out", out,
-		"config", configFile,
 	)
 
-	// 設定ファイルの優先順位: --config > --env > デフォルト
-	cfgPath := envFile
-	if configFile != "" {
-		cfgPath = configFile
-	}
-
 	// 共通コンテキストの初期化
-	appCtx, err := NewAppContext(ctx, cfgPath)
+	appCtx, err := NewAppContext(ctx, envFile)
 	if err != nil {
 		return err
 	}
 	defer appCtx.Close()
 
-	// 出力ディレクトリの決定: --out > WIKI_OUTPUT_DIR > デフォルト
+	// 出力ディレクトリの決定
 	outputDir := out
 	if outputDir == "" {
-		outputDir = appCtx.Config.WikiOutputDir
-		slog.Info("出力ディレクトリが未指定のため、設定値を使用します", "outputDir", outputDir)
+		// デフォルト値を設定（環境変数から取得可能）
+		outputDir = "/var/lib/dev-rag/wikis"
+		slog.Info("出力ディレクトリが未指定のため、デフォルト値を使用します", "outputDir", outputDir)
 	}
 
 	// Wiki生成処理を実行
@@ -53,117 +44,39 @@ func WikiGenerateAction(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Info("Wiki生成が完了しました")
 	return nil
-	*/
 }
 
-// executeWikiGeneration はプロダクト単位でWikiページを生成する（レガシー実装・将来削除予定）
+// executeWikiGeneration はプロダクト単位でWikiページを生成する
 func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName, outputDir string) error {
-	// TODO: WikiService を使った新しい実装に置き換える
-	return fmt.Errorf("not implemented")
-	/*
-	// 1. プロダクトIDを取得
-	indexingQueries := indexingsqlc.New(appCtx.Database.Pool)
-	wikiQueries := wikisqlc.New(appCtx.Database.Pool)
+	repo := appCtx.Container.IngestionRepo
 
-	product, err := indexingQueries.GetProductByName(ctx, productName)
+	// 1. プロダクト名からプロダクトを取得
+	slog.Info("プロダクトを取得します", "product", productName)
+	product, err := repo.GetProductByName(ctx, productName)
 	if err != nil {
 		return fmt.Errorf("プロダクト取得に失敗: %w", err)
 	}
 
-	// pgtype.UUIDをuuid.UUIDに変換
-	var productID uuid.UUID
-	if err := productID.UnmarshalBinary(product.ID.Bytes[:]); err != nil {
-		return fmt.Errorf("productIDの変換に失敗: %w", err)
+	slog.Info("プロダクトを取得しました", "productID", product.ID, "productName", product.Name)
+
+	// 2. プロダクト単位でWikiを生成
+	productOutputDir := fmt.Sprintf("%s/%s", outputDir, product.Name)
+
+	params := corewiki.GenerateParams{
+		ProductID: &product.ID,
+		OutputDir: productOutputDir,
 	}
 
-	slog.Info("プロダクトを取得しました", "productID", productID, "productName", product.Name)
-
-	// 2. 必要なコンポーネントを初期化
-	// Searcherの初期化（AppContextのEmbedderを再利用）
-	srch := search.NewSearcher(appCtx.Database, appCtx.Embedder)
-	srch.SetLogger(slog.Default())
-
-	// WikiGeneratorの作成（AppContextのWikiLLMClientを使用）
-	wikiGen := application.NewWikiGenerator(
-		indexingQueries,
-		wikiQueries,
-		appCtx.WikiLLMClient,
-		srch,
+	slog.Info("Wiki生成を開始します",
+		"productID", product.ID,
+		"productName", product.Name,
+		"outputDir", productOutputDir,
 	)
 
-	// 3. アーキテクチャページ生成
-	slog.Info("アーキテクチャページを生成します", "outputDir", outputDir)
-
-	if err := wikiGen.GenerateArchitecturePage(ctx, productID, outputDir); err != nil {
-		return fmt.Errorf("アーキテクチャページ生成に失敗: %w", err)
+	if err := appCtx.Container.WikiService.Generate(ctx, params); err != nil {
+		return fmt.Errorf("Wiki生成に失敗: %w", err)
 	}
 
-	slog.Info("アーキテクチャページの生成が完了しました")
-
-	// 4. ディレクトリページ生成
-	// プロダクトの全ソースを取得
-	var pgProductID uuid.UUID
-	copy(pgProductID[:], product.ID.Bytes[:])
-
-	var pgtypeProductID pgtype.UUID
-	if err := pgtypeProductID.Scan(pgProductID); err != nil {
-		return fmt.Errorf("productIDの変換に失敗: %w", err)
-	}
-
-	sources, err := indexingQueries.ListSourcesByProduct(ctx, pgtypeProductID)
-	if err != nil {
-		return fmt.Errorf("ソース一覧取得に失敗: %w", err)
-	}
-
-	if len(sources) == 0 {
-		slog.Warn("ソースが見つかりません", "product", productName)
-		return nil
-	}
-
-	// 各ソースのディレクトリページを生成
-	for _, source := range sources {
-		// pgtype.UUIDをuuid.UUIDに変換
-		var sourceID uuid.UUID
-		if err := sourceID.UnmarshalBinary(source.ID.Bytes[:]); err != nil {
-			slog.Warn("sourceIDの変換に失敗しました", "error", err)
-			continue
-		}
-
-		// 最新スナップショットを取得
-		snapshot, err := indexingQueries.GetLatestIndexedSnapshot(ctx, source.ID)
-		if err != nil {
-			slog.Warn("最新スナップショットが見つかりません", "sourceID", sourceID, "error", err)
-			continue
-		}
-
-		// ディレクトリサマリー一覧を取得
-		dirSummaries, err := wikiQueries.ListDirectorySummariesBySnapshot(ctx, snapshot.ID)
-		if err != nil {
-			slog.Warn("ディレクトリサマリー取得に失敗しました", "snapshotID", snapshot.ID, "error", err)
-			continue
-		}
-
-		slog.Info("ディレクトリページを生成します",
-			"sourceID", sourceID,
-			"sourceName", source.Name,
-			"directoriesCount", len(dirSummaries),
-		)
-
-		// 各ディレクトリのページを生成
-		for _, dirSummary := range dirSummaries {
-			if err := wikiGen.GenerateDirectoryPage(ctx, sourceID, dirSummary.Path, outputDir); err != nil {
-				slog.Warn("ディレクトリページ生成に失敗しました",
-					"path", dirSummary.Path,
-					"error", err,
-				)
-				// エラーがあっても続行
-				continue
-			}
-		}
-
-		slog.Info("ディレクトリページの生成が完了しました", "sourceID", sourceID)
-	}
-
+	slog.Info("Wiki生成処理完了", "productName", product.Name)
 	return nil
-	*/
 }
