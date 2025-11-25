@@ -235,33 +235,49 @@ make run-server PORT=8080
 ```
 dev-rag/
 ├── cmd/
-│   └── dev-rag/            # CLIエントリポイント ✓
-│       ├── main.go
-│       └── commands/       # CLIコマンド定義 ✓
-│           ├── product.go  # プロダクト管理コマンド
-│           ├── source.go   # ソース管理コマンド
-│           ├── wiki.go     # Wiki生成コマンド
-│           └── server.go   # HTTPサーバコマンド
-├── pkg/
-│   ├── config/             # 設定管理 ✓
-│   ├── db/                 # DB接続 ✓
-│   ├── models/             # データモデル ✓
-│   │   ├── product.go      # プロダクトモデル
-│   │   ├── source.go       # ソースモデル
-│   │   ├── wiki.go         # Wikiメタデータモデル
-│   │   └── ...
-│   ├── product/            # プロダクト管理（未実装）
-│   ├── source/             # ソース管理（未実装）
-│   ├── indexer/            # インデックス処理（未実装）
+│   └── dev-rag/            # CLIエントリポイント
+│       └── main.go
+├── internal/               # 内部実装（非公開パッケージ）
+│   ├── interface/          # インターフェース層
+│   │   ├── cli/            # CLIコマンド定義
+│   │   │   ├── product.go  # プロダクト管理コマンド
+│   │   │   ├── source.go   # ソース管理コマンド
+│   │   │   ├── wiki.go     # Wiki生成コマンド
+│   │   │   └── server.go   # HTTPサーバコマンド
+│   │   └── http/           # HTTPハンドラ（未実装）
+│   ├── module/             # ドメインモジュール（境界づけられたコンテキスト）
+│   │   ├── indexing/       # インデックス管理モジュール
+│   │   │   ├── domain/     # ドメインモデルとインターフェース
+│   │   │   ├── application/# アプリケーションサービス
+│   │   │   └── adapter/    # インフラストラクチャ実装
+│   │   │       └── pg/     # PostgreSQLアダプター（sqlc生成コード含む）
+│   │   ├── search/         # 検索モジュール
+│   │   │   ├── domain/
+│   │   │   ├── application/
+│   │   │   └── adapter/pg/
+│   │   ├── wiki/           # Wiki生成モジュール
+│   │   │   ├── domain/
+│   │   │   ├── application/
+│   │   │   └── adapter/pg/
+│   │   └── llm/            # LLMクライアントモジュール
+│   │       ├── domain/     # LLMインターフェース定義
+│   │       └── adapter/    # OpenAI/Anthropic実装
+│   └── platform/           # 横断的関心事
+│       ├── config/         # 設定管理
+│       ├── database/       # データベース接続・トランザクション
+│       └── container/      # DIコンテナ
+├── pkg/                    # 公開可能な汎用パッケージ（レガシー）
+│   ├── db/                 # DB接続（互換性のため残存）
+│   ├── lock/               # ロック管理（互換性のため残存）
+│   ├── repository/         # リポジトリ実装（互換性のため残存）
+│   ├── indexer/            # インデックス処理（段階的移行中）
 │   │   ├── chunker/        # チャンク化ロジック
-│   │   └── embedder/       # Embedding生成
-│   ├── search/             # ベクトル検索（未実装）
-│   ├── wiki/               # Wiki生成（未実装）
-│   ├── server/             # HTTPサーバ（未実装）
-│   │   ├── handlers/       # APIハンドラ
-│   │   └── middleware/     # 認証等
-│   └── jobs/               # ジョブ管理（未実装）
-├── migrations/             # DBマイグレーション（未作成）
+│   │   ├── embedder/       # Embedding生成
+│   │   └── ...
+│   ├── search/             # ベクトル検索（段階的移行中）
+│   ├── wiki/               # Wiki生成（段階的移行中）
+│   ├── query/              # クエリ処理
+│   └── provenance/         # 来歴管理
 ├── schema/                 # DBスキーマ定義
 │   └── schema.sql
 ├── docs/                   # ドキュメント
@@ -270,47 +286,65 @@ dev-rag/
 │   ├── database-schema.md  # データベーススキーマ
 │   └── api-interface.md    # API/インターフェース
 ├── wiki-viewer/            # Next.js Webアプリ（未実装）
-├── Makefile                # ビルドタスク ✓
+├── Makefile                # ビルドタスク
 ├── compose.yaml            # 開発用DB
 ├── .env.example            # 環境変数サンプル
 ├── .gitignore
 └── README.md
 ```
 
+### アーキテクチャの特徴
+
+- **レイヤードアーキテクチャ**: Interface → Application → Domain → Adapter の4層構造
+- **境界づけられたコンテキスト**: indexing, search, wiki, llm の各モジュールを独立管理
+- **依存性逆転**: ドメイン層がアダプター層に依存しない設計
+- **段階的移行**: `pkg/` から `internal/module/` へ段階的にリファクタリング中
+
 ## 実装状況
 
 ### 完了
-- ✓ プロジェクト構造
+- ✓ プロジェクト構造（レイヤードアーキテクチャ）
 - ✓ Go module初期化とライブラリインストール
-- ✓ 設定管理（pkg/config）
-- ✓ データベース接続（pkg/db）
-- ✓ データモデル定義（pkg/models）
+- ✓ 設定管理（internal/platform/config）
+- ✓ データベース接続・トランザクション（internal/platform/database）
+- ✓ DIコンテナ（internal/platform/container）
+- ✓ ドメインモデル定義（internal/module/*/domain）
+- ✓ リポジトリ実装（internal/module/*/adapter/pg + sqlc）
+- ✓ アプリケーションサービス（internal/module/*/application）
+- ✓ LLMクライアント（internal/module/llm）
 - ✓ CLIエントリポイント（cmd/dev-rag）
-- ✓ CLIコマンド基本構造（product/source/wiki/server）
-- ✓ Makefile
-
-### 未実装
-- プロダクト管理機能（pkg/product）
-- ソース管理機能（pkg/source）
-- インデックス処理（pkg/indexer）
+- ✓ CLIコマンド（internal/interface/cli: product/source/index/wiki/server）
+- ✓ プロダクト管理機能
+- ✓ ソース管理機能（Git対応）
+- ✓ インデックス処理（pkg/indexer）
   - Gitクローン/pull
   - チャンク化（pkg/indexer/chunker）
   - Embedding生成（pkg/indexer/embedder）
   - 差分更新ロジック
-  - .devragignore対応
-- ベクトル検索（pkg/search）
+  - ファイルサマリー生成
+  - 依存関係グラフ構築
+  - 重要度スコア計算
+  - カバレッジ分析
+- ✓ ベクトル検索（pkg/search）
   - プロダクト横断検索
   - ソース単位検索
-  - フィルタ機能（パス、コンテンツタイプ）
-- Wiki生成（pkg/wiki）
+  - 階層的検索
+- ✓ Wiki生成（pkg/wiki）
   - プロダクト単位生成
   - LLM連携（OpenAI/Anthropic）
   - Mermaid図生成
-- HTTPサーバとAPI（pkg/server）
-  - REST API実装
+  - アーキテクチャサマリー生成
+  - ディレクトリサマリー生成
+- ✓ HTTPサーバ（internal/interface/http: echo v4）
+- ✓ Makefile
+
+### 未実装・改善予定
+- HTTPサーバAPI拡充
+  - REST API実装（検索、Wiki生成トリガー等）
   - 非同期ジョブ処理
-- ジョブ管理（pkg/jobs）
 - wiki-viewer（Next.js Webアプリ）
+- pkg/ から internal/module/ への完全移行
+- テストカバレッジの拡充
 
 ## 開発
 

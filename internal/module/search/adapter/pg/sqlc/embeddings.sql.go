@@ -46,6 +46,118 @@ func (q *Queries) DeleteEmbedding(ctx context.Context, chunkID pgtype.UUID) erro
 	return err
 }
 
+const getChildChunks = `-- name: GetChildChunks :many
+SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.standard_imports, c.external_imports, c.internal_calls, c.external_calls, c.type_dependencies, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
+FROM chunks c
+INNER JOIN chunk_hierarchy ch ON c.id = ch.child_chunk_id
+WHERE ch.parent_chunk_id = $1
+ORDER BY ch.ordinal
+`
+
+func (q *Queries) GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error) {
+	rows, err := q.db.Query(ctx, getChildChunks, parentChunkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Chunk{}
+	for rows.Next() {
+		var i Chunk
+		if err := rows.Scan(
+			&i.ID,
+			&i.FileID,
+			&i.Ordinal,
+			&i.StartLine,
+			&i.EndLine,
+			&i.Content,
+			&i.ContentHash,
+			&i.TokenCount,
+			&i.ChunkType,
+			&i.ChunkName,
+			&i.ParentName,
+			&i.Signature,
+			&i.DocComment,
+			&i.Imports,
+			&i.Calls,
+			&i.LinesOfCode,
+			&i.CommentRatio,
+			&i.CyclomaticComplexity,
+			&i.EmbeddingContext,
+			&i.Level,
+			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
+			&i.SourceSnapshotID,
+			&i.GitCommitHash,
+			&i.Author,
+			&i.UpdatedAt,
+			&i.IndexedAt,
+			&i.FileVersion,
+			&i.IsLatest,
+			&i.ChunkKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getChunk = `-- name: GetChunk :one
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+WHERE id = $1
+`
+
+func (q *Queries) GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error) {
+	row := q.db.QueryRow(ctx, getChunk, id)
+	var i Chunk
+	err := row.Scan(
+		&i.ID,
+		&i.FileID,
+		&i.Ordinal,
+		&i.StartLine,
+		&i.EndLine,
+		&i.Content,
+		&i.ContentHash,
+		&i.TokenCount,
+		&i.ChunkType,
+		&i.ChunkName,
+		&i.ParentName,
+		&i.Signature,
+		&i.DocComment,
+		&i.Imports,
+		&i.Calls,
+		&i.LinesOfCode,
+		&i.CommentRatio,
+		&i.CyclomaticComplexity,
+		&i.EmbeddingContext,
+		&i.Level,
+		&i.ImportanceScore,
+		&i.StandardImports,
+		&i.ExternalImports,
+		&i.InternalCalls,
+		&i.ExternalCalls,
+		&i.TypeDependencies,
+		&i.SourceSnapshotID,
+		&i.GitCommitHash,
+		&i.Author,
+		&i.UpdatedAt,
+		&i.IndexedAt,
+		&i.FileVersion,
+		&i.IsLatest,
+		&i.ChunkKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getEmbedding = `-- name: GetEmbedding :one
 SELECT chunk_id, vector, model, created_at FROM embeddings
 WHERE chunk_id = $1
@@ -61,6 +173,125 @@ func (q *Queries) GetEmbedding(ctx context.Context, chunkID pgtype.UUID) (Embedd
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getParentChunk = `-- name: GetParentChunk :one
+SELECT c.id, c.file_id, c.ordinal, c.start_line, c.end_line, c.content, c.content_hash, c.token_count, c.chunk_type, c.chunk_name, c.parent_name, c.signature, c.doc_comment, c.imports, c.calls, c.lines_of_code, c.comment_ratio, c.cyclomatic_complexity, c.embedding_context, c.level, c.importance_score, c.standard_imports, c.external_imports, c.internal_calls, c.external_calls, c.type_dependencies, c.source_snapshot_id, c.git_commit_hash, c.author, c.updated_at, c.indexed_at, c.file_version, c.is_latest, c.chunk_key, c.created_at
+FROM chunks c
+INNER JOIN chunk_hierarchy ch ON c.id = ch.parent_chunk_id
+WHERE ch.child_chunk_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) (Chunk, error) {
+	row := q.db.QueryRow(ctx, getParentChunk, childChunkID)
+	var i Chunk
+	err := row.Scan(
+		&i.ID,
+		&i.FileID,
+		&i.Ordinal,
+		&i.StartLine,
+		&i.EndLine,
+		&i.Content,
+		&i.ContentHash,
+		&i.TokenCount,
+		&i.ChunkType,
+		&i.ChunkName,
+		&i.ParentName,
+		&i.Signature,
+		&i.DocComment,
+		&i.Imports,
+		&i.Calls,
+		&i.LinesOfCode,
+		&i.CommentRatio,
+		&i.CyclomaticComplexity,
+		&i.EmbeddingContext,
+		&i.Level,
+		&i.ImportanceScore,
+		&i.StandardImports,
+		&i.ExternalImports,
+		&i.InternalCalls,
+		&i.ExternalCalls,
+		&i.TypeDependencies,
+		&i.SourceSnapshotID,
+		&i.GitCommitHash,
+		&i.Author,
+		&i.UpdatedAt,
+		&i.IndexedAt,
+		&i.FileVersion,
+		&i.IsLatest,
+		&i.ChunkKey,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listChunksByOrdinalRange = `-- name: ListChunksByOrdinalRange :many
+SELECT id, file_id, ordinal, start_line, end_line, content, content_hash, token_count, chunk_type, chunk_name, parent_name, signature, doc_comment, imports, calls, lines_of_code, comment_ratio, cyclomatic_complexity, embedding_context, level, importance_score, standard_imports, external_imports, internal_calls, external_calls, type_dependencies, source_snapshot_id, git_commit_hash, author, updated_at, indexed_at, file_version, is_latest, chunk_key, created_at FROM chunks
+WHERE file_id = $1 AND ordinal BETWEEN $2 AND $3
+ORDER BY ordinal
+`
+
+type ListChunksByOrdinalRangeParams struct {
+	FileID    pgtype.UUID `json:"file_id"`
+	Ordinal   int32       `json:"ordinal"`
+	Ordinal_2 int32       `json:"ordinal_2"`
+}
+
+func (q *Queries) ListChunksByOrdinalRange(ctx context.Context, arg ListChunksByOrdinalRangeParams) ([]Chunk, error) {
+	rows, err := q.db.Query(ctx, listChunksByOrdinalRange, arg.FileID, arg.Ordinal, arg.Ordinal_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Chunk{}
+	for rows.Next() {
+		var i Chunk
+		if err := rows.Scan(
+			&i.ID,
+			&i.FileID,
+			&i.Ordinal,
+			&i.StartLine,
+			&i.EndLine,
+			&i.Content,
+			&i.ContentHash,
+			&i.TokenCount,
+			&i.ChunkType,
+			&i.ChunkName,
+			&i.ParentName,
+			&i.Signature,
+			&i.DocComment,
+			&i.Imports,
+			&i.Calls,
+			&i.LinesOfCode,
+			&i.CommentRatio,
+			&i.CyclomaticComplexity,
+			&i.EmbeddingContext,
+			&i.Level,
+			&i.ImportanceScore,
+			&i.StandardImports,
+			&i.ExternalImports,
+			&i.InternalCalls,
+			&i.ExternalCalls,
+			&i.TypeDependencies,
+			&i.SourceSnapshotID,
+			&i.GitCommitHash,
+			&i.Author,
+			&i.UpdatedAt,
+			&i.IndexedAt,
+			&i.FileVersion,
+			&i.IsLatest,
+			&i.ChunkKey,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const searchChunksByProduct = `-- name: SearchChunksByProduct :many

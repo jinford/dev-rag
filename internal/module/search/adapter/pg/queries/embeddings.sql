@@ -71,3 +71,26 @@ WHERE (sqlc.narg(path_prefix)::text IS NULL OR f.path LIKE (sqlc.narg(path_prefi
   AND (sqlc.narg(content_type)::text IS NULL OR f.content_type = sqlc.narg(content_type)::text)
 ORDER BY e.vector <=> sqlc.arg(query_vector)::vector
 LIMIT sqlc.arg(row_limit);
+
+-- name: GetChunk :one
+SELECT * FROM chunks
+WHERE id = $1;
+
+-- name: ListChunksByOrdinalRange :many
+SELECT * FROM chunks
+WHERE file_id = $1 AND ordinal BETWEEN $2 AND $3
+ORDER BY ordinal;
+
+-- name: GetParentChunk :one
+SELECT c.*
+FROM chunks c
+INNER JOIN chunk_hierarchy ch ON c.id = ch.parent_chunk_id
+WHERE ch.child_chunk_id = $1
+LIMIT 1;
+
+-- name: GetChildChunks :many
+SELECT c.*
+FROM chunks c
+INNER JOIN chunk_hierarchy ch ON c.id = ch.child_chunk_id
+WHERE ch.parent_chunk_id = $1
+ORDER BY ch.ordinal;

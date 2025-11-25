@@ -169,7 +169,7 @@ fmt:
 sqlc-generate:
 	@echo "SQLクエリからGoコードを生成中..."
 	@go tool sqlc generate
-	@echo "✓ コード生成完了: pkg/sqlc/"
+	@echo "✓ コード生成完了: internal/module/*/adapter/pg/sqlc/"
 
 # ビルド + テスト
 all: build test

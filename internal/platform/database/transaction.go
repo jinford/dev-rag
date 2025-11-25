@@ -6,10 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	indexingpg "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg"
 	indexingsqlc "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg/sqlc"
+	wikipg "github.com/jinford/dev-rag/internal/module/wiki/adapter/pg"
 	wikisqlc "github.com/jinford/dev-rag/internal/module/wiki/adapter/pg/sqlc"
-	"github.com/jinford/dev-rag/pkg/lock"
-	"github.com/jinford/dev-rag/pkg/repository"
 )
 
 // TransactionProvider follows the pattern described in https://threedots.tech/post/database-transactions-in-go/
@@ -25,22 +25,22 @@ func NewTransactionProvider(pool *pgxpool.Pool) *TransactionProvider {
 
 // Adapter bundles repository adapters that operate inside a single transaction.
 type Adapter struct {
-	Products *repository.ProductRepositoryRW
-	Sources  *repository.SourceRepositoryRW
-	Index    *repository.IndexRepositoryRW
-	Wiki     *repository.WikiRepositoryRW
-	Locks    *lock.Manager
+	Products *indexingpg.ProductRepository
+	Sources  *indexingpg.SourceRepository
+	Index    *indexingpg.IndexRepositoryRW
+	Wiki     *wikipg.WikiRepositoryRW
+	Locks    *Manager
 }
 
 func newAdapter(tx pgx.Tx) *Adapter {
 	indexingQueries := indexingsqlc.New(tx)
 	wikiQueries := wikisqlc.New(tx)
 	return &Adapter{
-		Products: repository.NewProductRepositoryRW(indexingQueries),
-		Sources:  repository.NewSourceRepositoryRW(indexingQueries),
-		Index:    repository.NewIndexRepositoryRW(indexingQueries),
-		Wiki:     repository.NewWikiRepositoryRW(wikiQueries),
-		Locks:    lock.NewManager(tx),
+		Products: indexingpg.NewProductRepository(indexingQueries),
+		Sources:  indexingpg.NewSourceRepository(indexingQueries),
+		Index:    indexingpg.NewIndexRepositoryRW(indexingQueries),
+		Wiki:     wikipg.NewWikiRepositoryRW(wikiQueries),
+		Locks:    NewManager(tx),
 	}
 }
 

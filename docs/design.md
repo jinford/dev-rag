@@ -86,32 +86,45 @@ graph TB
 
 ### 1.3 推奨ディレクトリ構成
 
-#### ソースコード
+#### ソースコード（現行アーキテクチャ）
 ```
 dev-rag/
 ├── cmd/
-│   └── dev-rag/         # CLI エントリポイント
-├── pkg/
-│   ├── config/          # 設定管理
-│   ├── db/              # DB接続・マイグレーション
-│   ├── models/          # データモデル定義
-│   ├── repository/      # リポジトリ管理
-│   ├── indexer/         # インデックス処理
-│   │   ├── chunker/     # チャンク化ロジック
-│   │   └── embedder/    # Embedding生成
-│   ├── search/          # ベクトル検索API
-│   ├── wiki/            # Wiki生成
-│   ├── server/          # HTTP サーバ
-│   │   ├── handlers/    # API ハンドラ
-│   │   └── middleware/  # 認証等
-│   └── jobs/            # ジョブ管理
-├── wiki-viewer/         # Next.js プロジェクト
+│   └── dev-rag/            # CLI エントリポイント
+├── internal/               # 内部実装（非公開パッケージ）
+│   ├── interface/          # インターフェース層
+│   │   ├── cli/            # CLIコマンド定義
+│   │   └── http/           # HTTPハンドラ
+│   ├── module/             # ドメインモジュール（境界づけられたコンテキスト）
+│   │   ├── indexing/       # インデックス管理モジュール
+│   │   │   ├── domain/     # ドメインモデルとインターフェース
+│   │   │   ├── application/# アプリケーションサービス
+│   │   │   └── adapter/pg/ # PostgreSQLアダプター（sqlc生成コード含む）
+│   │   ├── search/         # 検索モジュール
+│   │   ├── wiki/           # Wiki生成モジュール
+│   │   └── llm/            # LLMクライアントモジュール
+│   └── platform/           # 横断的関心事
+│       ├── config/         # 設定管理
+│       ├── database/       # データベース接続・トランザクション
+│       └── container/      # DIコンテナ
+├── pkg/                    # 公開可能な汎用パッケージ（レガシー、段階的移行中）
+│   ├── indexer/            # インデックス処理
+│   ├── search/             # ベクトル検索
+│   ├── wiki/               # Wiki生成
+│   └── ...
+├── schema/                 # DBスキーマ定義
+├── wiki-viewer/            # Next.js プロジェクト
 │   ├── app/
 │   ├── components/
 │   └── lib/
-├── migrations/          # DBマイグレーション
-└── docs/                # ドキュメント
+└── docs/                   # ドキュメント
 ```
+
+**アーキテクチャの特徴**:
+- レイヤードアーキテクチャ（Interface → Application → Domain → Adapter）
+- 境界づけられたコンテキスト（indexing, search, wiki, llm）
+- 依存性逆転（ドメイン層がアダプター層に依存しない）
+- pkg/ から internal/module/ への段階的移行
 
 #### デプロイ先
 ```

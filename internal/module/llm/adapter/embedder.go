@@ -109,5 +109,13 @@ func (e *OpenAIEmbedder) GetModelName() string {
 	return e.model
 }
 
+// GetDimension はベクトル次元数を取得します（indexing 互換性のため）
+func (e *OpenAIEmbedder) GetDimension() int {
+	return e.dimension
+}
+
+// BatchEmbed はバッチでEmbeddingを生成します（既に実装済み、インターフェースに明記）
+// 詳細は上記のBatchEmbedメソッドを参照
+
 // インターフェース実装の確認
 var _ domain.Embedder = (*OpenAIEmbedder)(nil)

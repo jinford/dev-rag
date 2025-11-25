@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jinford/dev-rag/cmd/dev-rag/commands"
+	clicmd "github.com/jinford/dev-rag/internal/interface/cli"
 	"github.com/jinford/dev-rag/internal/platform/logger"
 	"github.com/urfave/cli/v3"
 )
@@ -37,7 +37,7 @@ func main() {
 								Value: ".env",
 							},
 						},
-						Action: commands.ProductListAction,
+						Action: clicmd.ProductListAction,
 					},
 					{
 						Name:  "show",
@@ -54,7 +54,7 @@ func main() {
 								Required: true,
 							},
 						},
-						Action: commands.ProductShowAction,
+						Action: clicmd.ProductShowAction,
 					},
 				},
 			},
@@ -76,7 +76,7 @@ func main() {
 								Usage: "プロダクト名（絞り込み）",
 							},
 						},
-						Action: commands.SourceListAction,
+						Action: clicmd.SourceListAction,
 					},
 					{
 						Name:  "show",
@@ -93,7 +93,7 @@ func main() {
 								Required: true,
 							},
 						},
-						Action: commands.SourceShowAction,
+						Action: clicmd.SourceShowAction,
 					},
 				},
 			},
@@ -133,7 +133,7 @@ func main() {
 								Usage: "インデックス完了後にWikiを自動生成",
 							},
 						},
-						Action: commands.SourceIndexGitAction,
+						Action: clicmd.SourceIndexGitAction,
 					},
 				},
 			},
@@ -164,7 +164,7 @@ func main() {
 								Usage: "Wiki生成設定ファイル（省略時はデフォルト設定）",
 							},
 						},
-						Action: commands.WikiGenerateAction,
+						Action: clicmd.WikiGenerateAction,
 					},
 				},
 			},
@@ -187,7 +187,7 @@ func main() {
 								Value: 8080,
 							},
 						},
-						Action: commands.ServerStartAction,
+						Action: clicmd.ServerStartAction,
 					},
 				},
 			},

@@ -1,0 +1,116 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  disable-all: true
+  enable:
+    - depguard
+
+linters-settings:
+  depguard:
+    rules:
+      # ルール1: application から adapter への依存を禁止
+      application-cannot-import-adapter:
+        list-mode: lax
+        files:
+          - "**/internal/module/*/application/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter"
+            desc: "application 層は adapter 層を直接 import してはいけません。domain のポート（interface）を使用してください。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/adapter"
+            desc: "application 層は adapter 層を直接 import してはいけません。domain のポート（interface）を使用してください。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/wiki/adapter"
+            desc: "application 層は adapter 層を直接 import してはいけません。domain のポート（interface）を使用してください。"
+
+      # ルール2: domain から adapter への依存を禁止
+      domain-cannot-import-adapter:
+        list-mode: lax
+        files:
+          - "**/internal/module/*/domain/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter"
+            desc: "domain 層は adapter 層を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/adapter"
+            desc: "domain 層は adapter 層を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/wiki/adapter"
+            desc: "domain 層は adapter 層を直接 import してはいけません。"
+
+      # ルール3: cmd から adapter への依存を禁止
+      cmd-cannot-import-adapter:
+        list-mode: lax
+        files:
+          - "**/cmd/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter"
+            desc: "cmd 層は adapter 層を直接 import してはいけません。Container 経由で依存を注入してください。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/adapter"
+            desc: "cmd 層は adapter 層を直接 import してはいけません。Container 経由で依存を注入してください。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/wiki/adapter"
+            desc: "cmd 層は adapter 層を直接 import してはいけません。Container 経由で依存を注入してください。"
+
+      # ルール4: indexing から他モジュールへの依存を禁止
+      indexing-no-cross-module:
+        list-mode: lax
+        files:
+          - "**/internal/module/indexing/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/search"
+            desc: "indexing モジュールは search モジュールを直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/wiki"
+            desc: "indexing モジュールは wiki モジュールを直接 import してはいけません。"
+
+      # ルール5: search から他モジュールへの依存を禁止（sqlc 除く）
+      search-no-cross-module:
+        list-mode: lax
+        files:
+          - "**/internal/module/search/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/domain"
+            desc: "search モジュールは indexing モジュールの domain を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/application"
+            desc: "search モジュールは indexing モジュールの application を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter"
+            desc: "search モジュールは indexing モジュールの adapter を直接 import してはいけません（sqlc を除く）。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/wiki"
+            desc: "search モジュールは wiki モジュールを直接 import してはいけません。"
+
+      # ルール6: wiki から他モジュールへの依存を禁止（sqlc 除く）
+      wiki-no-cross-module:
+        list-mode: lax
+        files:
+          - "**/internal/module/wiki/**/*.go"
+        deny:
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/domain"
+            desc: "wiki モジュールは indexing モジュールの domain を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/application"
+            desc: "wiki モジュールは indexing モジュールの application を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter/pg$"
+            desc: "wiki モジュールは indexing モジュールの adapter/pg を直接 import してはいけません（sqlc を除く）。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/indexing/adapter/llm"
+            desc: "wiki モジュールは indexing モジュールの adapter/llm を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/domain"
+            desc: "wiki モジュールは search モジュールの domain を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/application"
+            desc: "wiki モジュールは search モジュールの application を直接 import してはいけません。"
+          - pkg: "github.com/jinford/dev-rag/internal/module/search/adapter"
+            desc: "wiki モジュールは search モジュールの adapter を直接 import してはいけません。"
+
+issues:
+  exclude-rules:
+    # テストファイルは緩和
+    - path: _test\.go
+      linters:
+        - depguard
+    # Container は例外（すべてのモジュールを集約する役割）
+    - path: internal/platform/container/container\.go
+      linters:
+        - depguard
+    # interface 層（CLI）は adapter を直接 import しても良い（DI の起点）
+    - path: internal/interface/
+      linters:
+        - depguard
+
+  max-issues-per-linter: 0
+  max-same-issues: 0

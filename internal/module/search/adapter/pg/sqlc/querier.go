@@ -13,7 +13,11 @@ import (
 type Querier interface {
 	CreateEmbedding(ctx context.Context, arg CreateEmbeddingParams) (Embedding, error)
 	DeleteEmbedding(ctx context.Context, chunkID pgtype.UUID) error
+	GetChildChunks(ctx context.Context, parentChunkID pgtype.UUID) ([]Chunk, error)
+	GetChunk(ctx context.Context, id pgtype.UUID) (Chunk, error)
 	GetEmbedding(ctx context.Context, chunkID pgtype.UUID) (Embedding, error)
+	GetParentChunk(ctx context.Context, childChunkID pgtype.UUID) (Chunk, error)
+	ListChunksByOrdinalRange(ctx context.Context, arg ListChunksByOrdinalRangeParams) ([]Chunk, error)
 	SearchChunksByProduct(ctx context.Context, arg SearchChunksByProductParams) ([]SearchChunksByProductRow, error)
 	SearchChunksBySource(ctx context.Context, arg SearchChunksBySourceParams) ([]SearchChunksBySourceRow, error)
 	SearchSimilarChunks(ctx context.Context, arg SearchSimilarChunksParams) ([]SearchSimilarChunksRow, error)
