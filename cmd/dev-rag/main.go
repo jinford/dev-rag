@@ -16,7 +16,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 構造化ログの設定（platform層を使用）
+	// 構造化ログの設定(platform層を使用)
 	_ = logger.New(logger.DefaultConfig())
 
 	app := &cli.Command{
@@ -167,6 +167,29 @@ func main() {
 						Action: appcli.WikiGenerateAction,
 					},
 				},
+			},
+			{
+				Name:  "ask",
+				Usage: "プロダクトに関する質問に回答",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "env",
+						Usage: "環境変数ファイルパス",
+						Value: ".env",
+					},
+					&cli.StringFlag{
+						Name:     "product",
+						Usage:    "プロダクト名",
+						Required: true,
+					},
+					&cli.BoolFlag{
+						Name:  "show-sources",
+						Usage: "参照したソースを表示",
+						Value: false,
+					},
+				},
+				ArgsUsage: "<質問文>",
+				Action:    appcli.AskAction,
 			},
 			{
 				Name:  "server",

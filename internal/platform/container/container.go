@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pkoukk/tiktoken-go"
 
+	coreask "github.com/jinford/dev-rag/internal/core/ask"
 	coreingestion "github.com/jinford/dev-rag/internal/core/ingestion"
 	"github.com/jinford/dev-rag/internal/core/ingestion/chunk"
 	"github.com/jinford/dev-rag/internal/core/ingestion/summary"
@@ -28,6 +29,7 @@ type ServiceContainer struct {
 	SummaryService    *summary.SummaryService
 	SearchService     *coresearch.SearchService
 	WikiService       *corewiki.WikiService
+	AskService        *coreask.AskService
 	IngestionRepo     coreingestion.Repository // プロダクト/ソース/スナップショット操作用
 	SummaryRepository summary.Repository       // 要約操作用
 
@@ -120,11 +122,15 @@ func NewContainerWithDB(logger *slog.Logger, cfg *config.Config, db *database.Da
 	// WikiService（実際のOpenAIクライアントを使用）
 	wikiService := corewiki.NewWikiService(searchService, &wikiRepositoryStub{}, openaiLLMClient, &wikiFileReaderStub{}, logger)
 
+	// AskService
+	askService := coreask.NewAskService(searchService, openaiLLMClient, logger)
+
 	return &ServiceContainer{
 		IndexService:      indexService,
 		SummaryService:    summaryService,
 		SearchService:     searchService,
 		WikiService:       wikiService,
+		AskService:        askService,
 		IngestionRepo:     indexRepo,
 		SummaryRepository: summaryRepo,
 		logger:            logger,
