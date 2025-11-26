@@ -168,6 +168,13 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 	processedFiles := 0
 	totalChunks := 0
 
+	// インデックス化コンテキストを作成
+	docCtx := indexDocumentContext{
+		ProductName:       params.ProductName,
+		SourceName:        sourceName,
+		VersionIdentifier: versionIdentifier,
+	}
+
 	for _, doc := range documents {
 		// 除外すべきドキュメントをスキップ
 		if s.sourceProvider.ShouldIgnore(doc) {
@@ -176,7 +183,7 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 		}
 
 		// ファイルをインデックス化
-		chunks, err := s.indexDocument(ctx, snapshot.ID, doc)
+		chunks, err := s.indexDocument(ctx, snapshot.ID, doc, docCtx)
 		if err != nil {
 			s.logger.Warn("ドキュメントのインデックス化に失敗",
 				"path", doc.Path,
@@ -213,7 +220,7 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 }
 
 // indexDocument は単一のドキュメントをインデックス化する
-func (s *IndexService) indexDocument(ctx context.Context, snapshotID uuid.UUID, doc *SourceDocument) ([]*Chunk, error) {
+func (s *IndexService) indexDocument(ctx context.Context, snapshotID uuid.UUID, doc *SourceDocument, docCtx indexDocumentContext) ([]*Chunk, error) {
 	// 言語を検出
 	language, err := s.languageDetect.DetectLanguage(doc.Path, []byte(doc.Content))
 	if err != nil {
@@ -258,6 +265,10 @@ func (s *IndexService) indexDocument(ctx context.Context, snapshotID uuid.UUID, 
 	for i, result := range chunkResults {
 		// チャンクメタデータを変換
 		metadata := s.convertChunkMetadata(result.Metadata)
+
+		// ChunkKeyを生成
+		chunkKey := generateChunkKey(docCtx, doc.Path, result.StartLine, result.EndLine, i)
+		metadata.ChunkKey = chunkKey
 
 		// チャンクを作成
 		chunk, err := s.repository.CreateChunk(
@@ -361,4 +372,25 @@ func (s *IndexService) convertChunkMetadata(meta *chunk.ChunkMetadata) *ChunkMet
 func (s *IndexService) computeContentHash(content string) string {
 	hash := sha256.Sum256([]byte(content))
 	return fmt.Sprintf("%x", hash)
+}
+
+// indexDocumentContext はドキュメントインデックス化のコンテキスト情報
+type indexDocumentContext struct {
+	ProductName       string
+	SourceName        string
+	VersionIdentifier string // commit hash や version など
+}
+
+// generateChunkKey はチャンクのユニークキーを生成する
+// 形式: {product_name}/{source_name}/{file_path}#L{start}-L{end}:{ordinal}@{commit_hash}
+func generateChunkKey(ctx indexDocumentContext, filePath string, startLine, endLine, ordinal int) string {
+	return fmt.Sprintf("%s/%s/%s#L%d-L%d:%d@%s",
+		ctx.ProductName,
+		ctx.SourceName,
+		filePath,
+		startLine,
+		endLine,
+		ordinal,
+		ctx.VersionIdentifier,
+	)
 }
