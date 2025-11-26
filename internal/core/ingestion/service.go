@@ -3,6 +3,7 @@ package ingestion
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -137,7 +138,30 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 	// 新しいスナップショットを作成
 	snapshot, err := s.repository.CreateSnapshot(ctx, source.ID, versionIdentifier)
 	if err != nil {
-		return nil, fmt.Errorf("スナップショットの作成に失敗: %w", err)
+		// 重複エラーの場合、既存スナップショットを取得して再利用
+		if errors.Is(err, ErrSnapshotVersionConflict) {
+			s.logger.Info("スナップショットが既に存在します。既存のスナップショットを再利用",
+				"version", versionIdentifier,
+			)
+			existingSnapshot, getErr := s.repository.GetSnapshotByVersion(ctx, source.ID, versionIdentifier)
+			if getErr != nil {
+				return nil, fmt.Errorf("既存スナップショットの取得に失敗: %w", getErr)
+			}
+			// 既にインデックス済みの場合はそのまま返す
+			if existingSnapshot.Indexed {
+				return &IndexResult{
+					SnapshotID:        existingSnapshot.ID,
+					VersionIdentifier: versionIdentifier,
+					ProcessedFiles:    0,
+					TotalChunks:       0,
+					Duration:          time.Since(startTime),
+				}, nil
+			}
+			// インデックス未完了の場合は再利用してインデックス処理を継続
+			snapshot = existingSnapshot
+		} else {
+			return nil, fmt.Errorf("スナップショットの作成に失敗: %w", err)
+		}
 	}
 
 	// ドキュメントをインデックス化

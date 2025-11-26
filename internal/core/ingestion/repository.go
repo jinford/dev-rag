@@ -2,9 +2,13 @@ package ingestion
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 )
+
+// ErrSnapshotVersionConflict はスナップショットのバージョン重複エラー
+var ErrSnapshotVersionConflict = errors.New("snapshot version already exists")
 
 // Repository はインデックス関連の全データアクセスを統合するインターフェース
 // テスト時のモック用に消費者側で定義

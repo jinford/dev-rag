@@ -3,11 +3,13 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jinford/dev-rag/internal/core/ingestion"
 	"github.com/jinford/dev-rag/internal/infra/postgres/sqlc"
@@ -353,6 +355,11 @@ func (r *Repository) CreateSnapshot(ctx context.Context, sourceID uuid.UUID, ver
 		VersionIdentifier: versionIdentifier,
 	})
 	if err != nil {
+		// PostgreSQLのユニーク制約違反エラー（23505）をチェック
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, fmt.Errorf("failed to create snapshot: %w", ingestion.ErrSnapshotVersionConflict)
+		}
 		return nil, fmt.Errorf("failed to create snapshot: %w", err)
 	}
 
