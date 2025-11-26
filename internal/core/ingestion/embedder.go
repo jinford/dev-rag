@@ -15,6 +15,9 @@ type Embedder interface {
 
 	// Dimension はEmbeddingベクトルの次元数を返す
 	Dimension() int
+
+	// MaxBatchSize はバッチ処理の最大サイズを返す
+	MaxBatchSize() int
 }
 
 // Metadata は Embedder のメタデータを表す

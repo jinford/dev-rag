@@ -32,6 +32,7 @@ type IndexService struct {
 	languageDetect  chunk.LanguageDetector
 	tokenCounter    chunk.TokenCounter
 	chunkerConfig   *chunk.ChunkerConfig
+	pipelineConfig  *PipelineConfig
 	logger          *slog.Logger
 }
 
@@ -45,6 +46,7 @@ type IndexServiceConfig struct {
 	LanguageDetect  chunk.LanguageDetector
 	TokenCounter    chunk.TokenCounter
 	ChunkerConfig   *chunk.ChunkerConfig
+	PipelineConfig  *PipelineConfig
 	Logger          *slog.Logger
 }
 
@@ -52,6 +54,9 @@ type IndexServiceConfig struct {
 func NewIndexService(cfg IndexServiceConfig) *IndexService {
 	if cfg.ChunkerConfig == nil {
 		cfg.ChunkerConfig = chunk.DefaultChunkerConfig()
+	}
+	if cfg.PipelineConfig == nil {
+		cfg.PipelineConfig = DefaultPipelineConfig()
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -66,6 +71,7 @@ func NewIndexService(cfg IndexServiceConfig) *IndexService {
 		languageDetect: cfg.LanguageDetect,
 		tokenCounter:   cfg.TokenCounter,
 		chunkerConfig:  cfg.ChunkerConfig,
+		pipelineConfig: cfg.PipelineConfig,
 		logger:         cfg.Logger,
 	}
 }
@@ -164,10 +170,6 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 		}
 	}
 
-	// ドキュメントをインデックス化
-	processedFiles := 0
-	totalChunks := 0
-
 	// インデックス化コンテキストを作成
 	docCtx := indexDocumentContext{
 		ProductName:       params.ProductName,
@@ -175,25 +177,25 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 		VersionIdentifier: versionIdentifier,
 	}
 
-	for _, doc := range documents {
-		// 除外すべきドキュメントをスキップ
-		if s.sourceProvider.ShouldIgnore(doc) {
-			s.logger.Debug("ドキュメントを除外", "path", doc.Path)
-			continue
-		}
+	// パイプライン処理でドキュメントをインデックス化
+	pipeline := NewIndexPipeline(
+		s.repository,
+		s.embedder,
+		s.chunkerFactory,
+		s.languageDetect,
+		s.pipelineConfig,
+		s.logger,
+	)
 
-		// ファイルをインデックス化
-		chunks, err := s.indexDocument(ctx, snapshot.ID, doc, docCtx)
-		if err != nil {
-			s.logger.Warn("ドキュメントのインデックス化に失敗",
-				"path", doc.Path,
-				"error", err,
-			)
-			continue
-		}
-
-		processedFiles++
-		totalChunks += len(chunks)
+	processedFiles, totalChunks, err := pipeline.ProcessDocuments(
+		ctx,
+		snapshot.ID,
+		documents,
+		docCtx,
+		s.sourceProvider.ShouldIgnore,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("パイプライン処理に失敗: %w", err)
 	}
 
 	// スナップショットを完了としてマーク

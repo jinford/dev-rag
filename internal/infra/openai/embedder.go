@@ -96,6 +96,11 @@ func (e *Embedder) Dimension() int {
 	return e.dimension
 }
 
+// MaxBatchSize はバッチ処理の最大サイズを返す（OpenAI APIは最大100件）
+func (e *Embedder) MaxBatchSize() int {
+	return 100
+}
+
 // Metadata はモデル情報を返す
 func (e *Embedder) Metadata() ingestion.Metadata {
 	return ingestion.Metadata{

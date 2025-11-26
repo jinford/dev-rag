@@ -71,7 +71,10 @@ func NewASTChunkerGo() *ASTChunkerGo {
 }
 
 // Chunk はGo言語のソースコードをAST解析してチャンク化します
-func (ac *ASTChunkerGo) Chunk(content string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) ([]*ChunkWithMetadata, error) {
+func (ac *ASTChunkerGo) Chunk(content string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) ([]*ChunkWithMetadata, error) {
 	result := ac.ChunkWithMetrics(content, chunkCounter)
 	if !result.ParseSuccess {
 		return nil, fmt.Errorf("failed to parse Go source")
@@ -80,7 +83,10 @@ func (ac *ASTChunkerGo) Chunk(content string, chunkCounter interface{ CountToken
 }
 
 // ChunkWithMetrics はGo言語のソースコードをAST解析してチャンク化し、メトリクスも返します
-func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) *ASTChunkResult {
+func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) *ASTChunkResult {
 	result := &ASTChunkResult{
 		Chunks:                   make([]*ChunkWithMetadata, 0),
 		ParseSuccess:             false,
@@ -120,17 +126,15 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunkCounter interface{
 		case *ast.FuncDecl:
 			// 関数・メソッドを抽出（ロジック分割を含む）
 			chunks, excluded := ac.extractFunctionWithLogicSplittingDetailed(d, file, lines, importInfo, chunkCounter)
-			if chunks != nil {
-				for _, chunk := range chunks {
-					// レベル設定（関数チャンクはレベル2、ロジックチャンクはレベル3）
-					if chunk.Metadata.Level == 0 {
-						chunk.Metadata.Level = 2 // デフォルトはレベル2
-					}
-					result.Chunks = append(result.Chunks, chunk)
-					// 循環的複雑度を記録（関数チャンクのみ）
-					if chunk.Metadata != nil && chunk.Metadata.CyclomaticComplexity != nil && chunk.Metadata.Level == 2 {
-						result.CyclomaticComplexities = append(result.CyclomaticComplexities, *chunk.Metadata.CyclomaticComplexity)
-					}
+			for _, chunk := range chunks {
+				// レベル設定（関数チャンクはレベル2、ロジックチャンクはレベル3）
+				if chunk.Metadata.Level == 0 {
+					chunk.Metadata.Level = 2 // デフォルトはレベル2
+				}
+				result.Chunks = append(result.Chunks, chunk)
+				// 循環的複雑度を記録（関数チャンクのみ）
+				if chunk.Metadata != nil && chunk.Metadata.CyclomaticComplexity != nil && chunk.Metadata.Level == 2 {
+					result.CyclomaticComplexities = append(result.CyclomaticComplexities, *chunk.Metadata.CyclomaticComplexity)
 				}
 			}
 			if excluded {
@@ -151,7 +155,10 @@ func (ac *ASTChunkerGo) ChunkWithMetrics(content string, chunkCounter interface{
 }
 
 // extractPackageDoc はパッケージレベルのコメントを抽出します
-func (ac *ASTChunkerGo) extractPackageDoc(file *ast.File, lines []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) *ChunkWithMetadata {
+func (ac *ASTChunkerGo) extractPackageDoc(file *ast.File, lines []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) *ChunkWithMetadata {
 	if file.Doc == nil {
 		return nil
 	}
@@ -257,14 +264,20 @@ func (ac *ASTChunkerGo) isStandardLibrary(path string) bool {
 }
 
 // extractFunction は関数・メソッドを抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractFunction(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) *ChunkWithMetadata {
+func (ac *ASTChunkerGo) extractFunction(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) *ChunkWithMetadata {
 	chunk, _ := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunkCounter)
 	return chunk
 }
 
 // extractFunctionWithMetrics は関数・メソッドを抽出し、除外されたかどうかを返します
 // 大きな関数の場合はロジック単位に分割します
-func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(fn.Pos())
 	endPos := ac.fset.Position(fn.End())
 
@@ -338,7 +351,10 @@ func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.F
 }
 
 // extractFunctionWithMetricsDetailed は関数・メソッドを抽出し、詳細な依存関係情報を含めます
-func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(fn.Pos())
 	endPos := ac.fset.Position(fn.End())
 
@@ -418,7 +434,10 @@ func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, fil
 
 // extractFunctionWithLogicSplitting は関数を抽出し、必要に応じてロジック単位に分割します
 // レベル3ロジック単位チャンキング
-func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) ([]*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) ([]*ChunkWithMetadata, bool) {
 	// まず通常の関数チャンクを生成
 	funcChunk, excluded := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunkCounter)
 	if funcChunk == nil {
@@ -459,7 +478,10 @@ func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file
 
 // extractFunctionWithLogicSplittingDetailed は関数を抽出し、必要に応じてロジック単位に分割します（詳細版）
 // 詳細な依存関係情報を含む
-func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) ([]*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) ([]*ChunkWithMetadata, bool) {
 	// まず詳細な関数チャンクを生成
 	funcChunk, excluded := ac.extractFunctionWithMetricsDetailed(fn, file, lines, importInfo, chunkCounter)
 	if funcChunk == nil {
@@ -499,13 +521,19 @@ func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDe
 }
 
 // extractGenDecl は型定義、変数、定数を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractGenDecl(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) []*ChunkWithMetadata {
+func (ac *ASTChunkerGo) extractGenDecl(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) []*ChunkWithMetadata {
 	chunks, _ := ac.extractGenDeclWithMetrics(decl, file, lines, imports, chunkCounter)
 	return chunks
 }
 
 // extractGenDeclWithMetrics は型定義、変数、定数を抽出し、除外数を返します
-func (ac *ASTChunkerGo) extractGenDeclWithMetrics(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) ([]*ChunkWithMetadata, int) {
+func (ac *ASTChunkerGo) extractGenDeclWithMetrics(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) ([]*ChunkWithMetadata, int) {
 	var chunks []*ChunkWithMetadata
 	excludedCount := 0
 
@@ -537,7 +565,10 @@ func (ac *ASTChunkerGo) extractGenDeclWithMetrics(decl *ast.GenDecl, file *ast.F
 }
 
 // extractGenDeclWithMetricsDetailed は型定義、変数、定数を抽出し、除外数を返します（詳細版）
-func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) ([]*ChunkWithMetadata, int) {
+func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) ([]*ChunkWithMetadata, int) {
 	var chunks []*ChunkWithMetadata
 	excludedCount := 0
 
@@ -569,13 +600,19 @@ func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, fil
 }
 
 // extractTypeSpec は型定義を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) *ChunkWithMetadata {
+func (ac *ASTChunkerGo) extractTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) *ChunkWithMetadata {
 	chunk, _ := ac.extractTypeSpecWithMetrics(spec, decl, lines, imports, chunkCounter)
 	return chunk
 }
 
 // extractTypeSpecWithMetrics は型定義を抽出し、除外されたかどうかを返します
-func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
 
@@ -636,7 +673,10 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast
 }
 
 // extractTypeSpecWithMetricsDetailed は型定義を抽出し、詳細な依存関係情報を含めます
-func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
 
@@ -699,13 +739,19 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, d
 }
 
 // extractValueSpec は変数・定数を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) *ChunkWithMetadata {
+func (ac *ASTChunkerGo) extractValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) *ChunkWithMetadata {
 	chunk, _ := ac.extractValueSpecWithMetrics(spec, decl, lines, imports, chunkCounter)
 	return chunk
 }
 
 // extractValueSpecWithMetrics は変数・定数を抽出し、除外されたかどうかを返します
-func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
 
@@ -769,7 +815,10 @@ func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *a
 }
 
 // extractValueSpecWithMetricsDetailed は変数・定数を抽出し、詳細な依存関係情報を含めます
-func (ac *ASTChunkerGo) extractValueSpecWithMetricsDetailed(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunkCounter interface{ CountTokens(string) int; TrimToTokenLimit(string, int) string }) (*ChunkWithMetadata, bool) {
+func (ac *ASTChunkerGo) extractValueSpecWithMetricsDetailed(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, importInfo *ImportInfo, chunkCounter interface {
+	CountTokens(string) int
+	TrimToTokenLimit(string, int) string
+}) (*ChunkWithMetadata, bool) {
 	startPos := ac.fset.Position(decl.Pos())
 	endPos := ac.fset.Position(decl.End())
 

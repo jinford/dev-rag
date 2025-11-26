@@ -29,6 +29,7 @@ func (r *iteratorForCreateChunkBatch) Next() bool {
 
 func (r iteratorForCreateChunkBatch) Values() ([]interface{}, error) {
 	return []interface{}{
+		r.rows[0].ID,
 		r.rows[0].FileID,
 		r.rows[0].Ordinal,
 		r.rows[0].StartLine,
@@ -47,6 +48,13 @@ func (r iteratorForCreateChunkBatch) Values() ([]interface{}, error) {
 		r.rows[0].CommentRatio,
 		r.rows[0].CyclomaticComplexity,
 		r.rows[0].EmbeddingContext,
+		r.rows[0].Level,
+		r.rows[0].ImportanceScore,
+		r.rows[0].StandardImports,
+		r.rows[0].ExternalImports,
+		r.rows[0].InternalCalls,
+		r.rows[0].ExternalCalls,
+		r.rows[0].TypeDependencies,
 		r.rows[0].SourceSnapshotID,
 		r.rows[0].GitCommitHash,
 		r.rows[0].Author,
@@ -63,5 +71,5 @@ func (r iteratorForCreateChunkBatch) Err() error {
 }
 
 func (q *Queries) CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"chunks"}, []string{"file_id", "ordinal", "start_line", "end_line", "content", "content_hash", "token_count", "chunk_type", "chunk_name", "parent_name", "signature", "doc_comment", "imports", "calls", "lines_of_code", "comment_ratio", "cyclomatic_complexity", "embedding_context", "source_snapshot_id", "git_commit_hash", "author", "updated_at", "indexed_at", "file_version", "is_latest", "chunk_key"}, &iteratorForCreateChunkBatch{rows: arg})
+	return q.db.CopyFrom(ctx, []string{"chunks"}, []string{"id", "file_id", "ordinal", "start_line", "end_line", "content", "content_hash", "token_count", "chunk_type", "chunk_name", "parent_name", "signature", "doc_comment", "imports", "calls", "lines_of_code", "comment_ratio", "cyclomatic_complexity", "embedding_context", "level", "importance_score", "standard_imports", "external_imports", "internal_calls", "external_calls", "type_dependencies", "source_snapshot_id", "git_commit_hash", "author", "updated_at", "indexed_at", "file_version", "is_latest", "chunk_key"}, &iteratorForCreateChunkBatch{rows: arg})
 }

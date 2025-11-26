@@ -128,21 +128,10 @@ func (c *DefaultChunker) chunkGoSourceCodeWithMetrics(content string, metricsCol
 	}
 
 	if !result.ParseSuccess {
-		// AST解析に失敗した場合は正規表現ベースにフォールバック
-		fallbackChunks, fallbackErr := c.chunkSourceCode(content)
-		if fallbackErr != nil {
-			return nil, fallbackErr
-		}
-		// メタデータなしで返す
-		chunksWithMeta := make([]*ChunkWithMetadata, len(fallbackChunks))
-		for i, chunk := range fallbackChunks {
-			chunksWithMeta[i] = &ChunkWithMetadata{
-				Chunk:    chunk,
-				Metadata: nil,
-			}
-		}
-		return chunksWithMeta, nil
+		// AST 解析に失敗した場合は処理を中断し、上流へエラーを返す
+		return nil, fmt.Errorf("failed to parse AST")
 	}
+
 	// ast.ChunkWithMetadata を chunker.ChunkWithMetadata に変換
 	return convertASTChunks(result.Chunks), nil
 }
@@ -534,7 +523,6 @@ func (c *DefaultChunker) TrimToTokenLimit(text string, maxTokens int) string {
 	return decoded
 }
 
-
 // convertASTChunks はast.ChunkWithMetadataをchunker.ChunkWithMetadataに変換します
 func convertASTChunks(astChunks []*ast.ChunkWithMetadata) []*ChunkWithMetadata {
 	chunks := make([]*ChunkWithMetadata, len(astChunks))
@@ -552,11 +540,9 @@ func convertASTChunks(astChunks []*ast.ChunkWithMetadata) []*ChunkWithMetadata {
 	return chunks
 }
 
-// convertASTMetadata はast.ChunkMetadataをchunker.ChunkMetadataに変換します
+// convertASTMetadata は ast.ChunkMetadata を chunker.ChunkMetadata に変換する。
+// 呼び出し元は非 nil を渡す契約（nil の場合は自然に panic し設計ミスが顕在化する）。
 func convertASTMetadata(am *ast.ChunkMetadata) *ChunkMetadata {
-	if am == nil {
-		return nil
-	}
 	return &ChunkMetadata{
 		Type:                 am.Type,
 		Name:                 am.Name,
@@ -577,4 +563,3 @@ func convertASTMetadata(am *ast.ChunkMetadata) *ChunkMetadata {
 		ImportanceScore:      am.ImportanceScore,
 	}
 }
-

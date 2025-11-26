@@ -10,6 +10,7 @@ import (
 )
 
 type CreateChunkBatchParams struct {
+	ID                   pgtype.UUID      `json:"id"`
 	FileID               pgtype.UUID      `json:"file_id"`
 	Ordinal              int32            `json:"ordinal"`
 	StartLine            int32            `json:"start_line"`
@@ -28,6 +29,13 @@ type CreateChunkBatchParams struct {
 	CommentRatio         pgtype.Numeric   `json:"comment_ratio"`
 	CyclomaticComplexity pgtype.Int4      `json:"cyclomatic_complexity"`
 	EmbeddingContext     pgtype.Text      `json:"embedding_context"`
+	Level                int32            `json:"level"`
+	ImportanceScore      pgtype.Numeric   `json:"importance_score"`
+	StandardImports      []byte           `json:"standard_imports"`
+	ExternalImports      []byte           `json:"external_imports"`
+	InternalCalls        []byte           `json:"internal_calls"`
+	ExternalCalls        []byte           `json:"external_calls"`
+	TypeDependencies     []byte           `json:"type_dependencies"`
 	SourceSnapshotID     pgtype.UUID      `json:"source_snapshot_id"`
 	GitCommitHash        pgtype.Text      `json:"git_commit_hash"`
 	Author               pgtype.Text      `json:"author"`

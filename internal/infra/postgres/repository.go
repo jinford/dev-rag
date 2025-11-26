@@ -789,14 +789,48 @@ func (r *Repository) BatchCreateChunks(ctx context.Context, chunks []*ingestion.
 
 	rows := make([]sqlc.CreateChunkBatchParams, 0, len(chunks))
 	for _, chunk := range chunks {
+		imports := JSONBFromStringSlice(chunk.Imports)
+		calls := JSONBFromStringSlice(chunk.Calls)
+		standardImports := JSONBFromStringSlice(chunk.StandardImports)
+		externalImports := JSONBFromStringSlice(chunk.ExternalImports)
+		internalCalls := JSONBFromStringSlice(chunk.InternalCalls)
+		externalCalls := JSONBFromStringSlice(chunk.ExternalCalls)
+		typeDependencies := JSONBFromStringSlice(chunk.TypeDependencies)
+
 		rows = append(rows, sqlc.CreateChunkBatchParams{
-			FileID:      UUIDToPgtype(chunk.FileID),
-			Ordinal:     int32(chunk.Ordinal),
-			StartLine:   int32(chunk.StartLine),
-			EndLine:     int32(chunk.EndLine),
-			Content:     chunk.Content,
-			ContentHash: chunk.ContentHash,
-			TokenCount:  IntToPgtype(chunk.TokenCount),
+			ID:                   UUIDToPgtype(chunk.ID),
+			FileID:               UUIDToPgtype(chunk.FileID),
+			Ordinal:              int32(chunk.Ordinal),
+			StartLine:            int32(chunk.StartLine),
+			EndLine:              int32(chunk.EndLine),
+			Content:              chunk.Content,
+			ContentHash:          chunk.ContentHash,
+			TokenCount:           IntToPgtype(chunk.TokenCount),
+			ChunkType:            StringPtrToPgtext(chunk.Type),
+			ChunkName:            StringPtrToPgtext(chunk.Name),
+			ParentName:           StringPtrToPgtext(chunk.ParentName),
+			Signature:            StringPtrToPgtext(chunk.Signature),
+			DocComment:           StringPtrToPgtext(chunk.DocComment),
+			Imports:              imports,
+			Calls:                calls,
+			LinesOfCode:          IntPtrToPgInt4(chunk.LinesOfCode),
+			CommentRatio:         Float64PtrToPgNumeric(chunk.CommentRatio),
+			CyclomaticComplexity: IntPtrToPgInt4(chunk.CyclomaticComplexity),
+			EmbeddingContext:     StringPtrToPgtext(chunk.EmbeddingContext),
+			SourceSnapshotID:     UUIDPtrToPgtype(chunk.SourceSnapshotID),
+			GitCommitHash:        StringPtrToPgtext(chunk.GitCommitHash),
+			Author:               StringPtrToPgtext(chunk.Author),
+			UpdatedAt:            TimePtrToPgtype(chunk.UpdatedAt),
+			IndexedAt:            TimeToPgtype(time.Now()),
+			FileVersion:          StringPtrToPgtext(chunk.FileVersion),
+			IsLatest:             chunk.IsLatest,
+			StandardImports:      standardImports,
+			ExternalImports:      externalImports,
+			InternalCalls:        internalCalls,
+			ExternalCalls:        externalCalls,
+			TypeDependencies:     typeDependencies,
+			Level:                int32(chunk.Level),
+			ChunkKey:             chunk.ChunkKey,
 		})
 	}
 
@@ -979,13 +1013,13 @@ func (r *Repository) GetDomainCoverageStats(ctx context.Context, snapshotID uuid
 	coverages := make([]*ingestion.DomainCoverage, 0, len(rows))
 	for _, row := range rows {
 		coverages = append(coverages, &ingestion.DomainCoverage{
-			Domain:           row.Domain,
-			TotalFiles:       int(row.TotalFiles),
-			IndexedFiles:     int(row.IndexedFiles),
-			IndexedChunks:    int(row.IndexedChunks),
-			CoverageRate:     PgnumericToFloat64(row.CoverageRate),
-			AvgCommentRatio:  PgnumericToFloat64(row.AvgCommentRatio),
-			AvgComplexity:    PgnumericToFloat64(row.AvgComplexity),
+			Domain:          row.Domain,
+			TotalFiles:      int(row.TotalFiles),
+			IndexedFiles:    int(row.IndexedFiles),
+			IndexedChunks:   int(row.IndexedChunks),
+			CoverageRate:    PgnumericToFloat64(row.CoverageRate),
+			AvgCommentRatio: PgnumericToFloat64(row.AvgCommentRatio),
+			AvgComplexity:   PgnumericToFloat64(row.AvgComplexity),
 		})
 	}
 
