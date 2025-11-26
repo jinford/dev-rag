@@ -109,7 +109,17 @@ func executeGitIndexing(ctx context.Context, appCtx *AppContext, repoURL, produc
 		"duration", result.Duration,
 	)
 
-	// 2. Wiki生成（未実装スタブ）
+	// 2. 要約生成（ファイル→ディレクトリ→アーキテクチャ）
+	// 常に実行（既存の要約はSummaryService内で差分検知してスキップ）
+	slog.Info("要約生成を開始します", "snapshotID", result.SnapshotID)
+	if err := appCtx.Container.SummaryService.GenerateForSnapshot(ctx, result.SnapshotID); err != nil {
+		slog.Warn("要約生成に失敗しました（インデックス化は成功）", "error", err)
+		// 要約生成の失敗はエラーとして返さない（インデックス化は成功しているため）
+	} else {
+		slog.Info("要約生成が完了しました", "snapshotID", result.SnapshotID)
+	}
+
+	// 3. Wiki生成（未実装スタブ）
 	if generateWiki {
 		slog.Warn("Wiki生成は新アーキテクチャでは未実装のためスキップします")
 	}
