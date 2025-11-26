@@ -65,37 +65,3 @@ func (r iteratorForCreateChunkBatch) Err() error {
 func (q *Queries) CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error) {
 	return q.db.CopyFrom(ctx, []string{"chunks"}, []string{"file_id", "ordinal", "start_line", "end_line", "content", "content_hash", "token_count", "chunk_type", "chunk_name", "parent_name", "signature", "doc_comment", "imports", "calls", "lines_of_code", "comment_ratio", "cyclomatic_complexity", "embedding_context", "source_snapshot_id", "git_commit_hash", "author", "updated_at", "indexed_at", "file_version", "is_latest", "chunk_key"}, &iteratorForCreateChunkBatch{rows: arg})
 }
-
-// iteratorForCreateEmbeddingBatch implements pgx.CopyFromSource.
-type iteratorForCreateEmbeddingBatch struct {
-	rows                 []CreateEmbeddingBatchParams
-	skippedFirstNextCall bool
-}
-
-func (r *iteratorForCreateEmbeddingBatch) Next() bool {
-	if len(r.rows) == 0 {
-		return false
-	}
-	if !r.skippedFirstNextCall {
-		r.skippedFirstNextCall = true
-		return true
-	}
-	r.rows = r.rows[1:]
-	return len(r.rows) > 0
-}
-
-func (r iteratorForCreateEmbeddingBatch) Values() ([]interface{}, error) {
-	return []interface{}{
-		r.rows[0].ChunkID,
-		r.rows[0].Vector,
-		r.rows[0].Model,
-	}, nil
-}
-
-func (r iteratorForCreateEmbeddingBatch) Err() error {
-	return nil
-}
-
-func (q *Queries) CreateEmbeddingBatch(ctx context.Context, arg []CreateEmbeddingBatchParams) (int64, error) {
-	return q.db.CopyFrom(ctx, []string{"embeddings"}, []string{"chunk_id", "vector", "model"}, &iteratorForCreateEmbeddingBatch{rows: arg})
-}

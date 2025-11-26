@@ -873,8 +873,16 @@ func (r *Repository) BatchCreateEmbeddings(ctx context.Context, embeddings []*in
 		})
 	}
 
-	if _, err := r.q.CreateEmbeddingBatch(ctx, rows); err != nil {
-		return fmt.Errorf("failed to batch create embeddings: %w", err)
+	var batchErr error
+	results := r.q.CreateEmbeddingBatch(ctx, rows)
+	results.Exec(func(i int, err error) {
+		if err != nil && batchErr == nil {
+			batchErr = fmt.Errorf("failed to insert embedding at index %d: %w", i, err)
+		}
+	})
+
+	if batchErr != nil {
+		return fmt.Errorf("failed to batch create embeddings: %w", batchErr)
 	}
 
 	return nil

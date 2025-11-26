@@ -21,7 +21,7 @@ type Querier interface {
 	CreateChunkBatch(ctx context.Context, arg []CreateChunkBatchParams) (int64, error)
 	CreateDependency(ctx context.Context, arg CreateDependencyParams) error
 	CreateEmbedding(ctx context.Context, arg CreateEmbeddingParams) (Embedding, error)
-	CreateEmbeddingBatch(ctx context.Context, arg []CreateEmbeddingBatchParams) (int64, error)
+	CreateEmbeddingBatch(ctx context.Context, arg []CreateEmbeddingBatchParams) *CreateEmbeddingBatchBatchResults
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
 	CreateGitRef(ctx context.Context, arg CreateGitRefParams) (GitRef, error)
 	CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error)

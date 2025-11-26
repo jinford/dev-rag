@@ -7,7 +7,6 @@ package sqlc
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
-	pgvector_go "github.com/pgvector/pgvector-go"
 )
 
 type CreateChunkBatchParams struct {
@@ -37,10 +36,4 @@ type CreateChunkBatchParams struct {
 	FileVersion          pgtype.Text      `json:"file_version"`
 	IsLatest             bool             `json:"is_latest"`
 	ChunkKey             string           `json:"chunk_key"`
-}
-
-type CreateEmbeddingBatchParams struct {
-	ChunkID pgtype.UUID        `json:"chunk_id"`
-	Vector  pgvector_go.Vector `json:"vector"`
-	Model   string             `json:"model"`
 }
