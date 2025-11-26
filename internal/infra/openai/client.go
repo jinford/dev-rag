@@ -137,7 +137,6 @@ func (c *Client) generateWithRetry(ctx context.Context, model string, prompt str
 			Messages: []openai.ChatCompletionMessageParamUnion{
 				openai.UserMessage(prompt),
 			},
-			Temperature: openai.Float(0.7),
 		}
 
 		completion, err := c.client.Chat.Completions.New(ctx, params)
