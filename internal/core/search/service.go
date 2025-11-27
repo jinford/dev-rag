@@ -3,8 +3,10 @@ package search
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // Embedder はテキストのEmbedding生成インターフェース
@@ -17,20 +19,41 @@ type Embedder interface {
 type SearchService struct {
 	repo     Repository
 	embedder Embedder
+	logger   *slog.Logger
+}
+
+type searchServiceOptions struct {
+	logger *slog.Logger
+}
+
+// SearchServiceOption は SearchService のオプション設定
+type SearchServiceOption func(*searchServiceOptions)
+
+// WithSearchLogger は SearchService にロガーを設定する
+func WithSearchLogger(logger *slog.Logger) SearchServiceOption {
+	return func(opts *searchServiceOptions) {
+		opts.logger = logger
+	}
 }
 
 // NewSearchService は新しいSearchServiceを作成する
-func NewSearchService(repo Repository, embedder Embedder) *SearchService {
+func NewSearchService(repo Repository, embedder Embedder, opts ...SearchServiceOption) *SearchService {
+	options := searchServiceOptions{logger: slog.Default()}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	return &SearchService{
 		repo:     repo,
 		embedder: embedder,
+		logger:   options.logger,
 	}
 }
 
 // SearchParams は検索パラメータを表す
 type SearchParams struct {
-	ProductID *uuid.UUID
-	SourceID  *uuid.UUID
+	ProductID mo.Option[uuid.UUID]
+	SourceID  mo.Option[uuid.UUID]
 	Query     string
 	Limit     int
 	Filter    *SearchFilter
@@ -42,7 +65,7 @@ func (s *SearchService) Search(ctx context.Context, params SearchParams) ([]*Sea
 	if params.Query == "" {
 		return nil, fmt.Errorf("query is required")
 	}
-	if params.ProductID == nil && params.SourceID == nil {
+	if params.ProductID.IsAbsent() && params.SourceID.IsAbsent() {
 		return nil, fmt.Errorf("either productID or sourceID is required")
 	}
 
@@ -66,10 +89,11 @@ func (s *SearchService) Search(ctx context.Context, params SearchParams) ([]*Sea
 
 	// ProductID または SourceID に基づいて検索
 	var results []*SearchResult
-	if params.ProductID != nil {
-		results, err = s.repo.SearchByProduct(ctx, *params.ProductID, queryVector, limit, filter)
-	} else {
-		results, err = s.repo.SearchBySource(ctx, *params.SourceID, queryVector, limit, filter)
+	switch {
+	case params.ProductID.IsPresent():
+		results, err = s.repo.SearchByProduct(ctx, params.ProductID.MustGet(), queryVector, limit, filter)
+	case params.SourceID.IsPresent():
+		results, err = s.repo.SearchBySource(ctx, params.SourceID.MustGet(), queryVector, limit, filter)
 	}
 
 	if err != nil {
@@ -151,10 +175,10 @@ func (s *SearchService) HybridSearch(ctx context.Context, params HybridSearchPar
 		return nil, fmt.Errorf("query is required")
 	}
 	// ProductIDとSnapshotIDは排他的（どちらか一方のみ指定可能）
-	if params.ProductID != nil && params.SnapshotID != uuid.Nil {
+	if params.ProductID.IsPresent() && params.SnapshotID != uuid.Nil {
 		return nil, fmt.Errorf("productID and snapshotID are mutually exclusive")
 	}
-	if params.ProductID == nil && params.SnapshotID == uuid.Nil {
+	if params.ProductID.IsAbsent() && params.SnapshotID == uuid.Nil {
 		return nil, fmt.Errorf("either productID or snapshotID is required")
 	}
 
@@ -198,14 +222,14 @@ func (s *SearchService) HybridSearch(ctx context.Context, params HybridSearchPar
 	summaryCh := make(chan summaryResult, 1)
 
 	// ProductIDが指定されている場合はプロダクト横断検索、そうでなければスナップショット検索
-	if params.ProductID != nil {
+	if params.ProductID.IsPresent() {
 		go func() {
-			chunks, err := s.repo.SearchChunksByProduct(ctx, *params.ProductID, queryVector, chunkLimit, chunkFilter)
+			chunks, err := s.repo.SearchChunksByProduct(ctx, params.ProductID.MustGet(), queryVector, chunkLimit, chunkFilter)
 			chunkCh <- chunkResult{chunks: chunks, err: err}
 		}()
 
 		go func() {
-			summaries, err := s.repo.SearchSummariesByProduct(ctx, *params.ProductID, queryVector, summaryLimit, summaryFilter)
+			summaries, err := s.repo.SearchSummariesByProduct(ctx, params.ProductID.MustGet(), queryVector, summaryLimit, summaryFilter)
 			summaryCh <- summaryResult{summaries: summaries, err: err}
 		}()
 	} else {

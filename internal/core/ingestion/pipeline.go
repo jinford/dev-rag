@@ -65,10 +65,6 @@ type documentTask struct {
 	Context  indexDocumentContext
 }
 
-// chunkItem はチャンクを Embedding ステージへ受け渡すための最小単位
-// （チャンク本体にテキストが含まれるため Text フィールドは不要）
-type chunkItem = Chunk
-
 // fileResult はファイル処理の結果
 type fileResult struct {
 	FilePath       string
@@ -406,7 +402,6 @@ func (p *IndexPipeline) chunkWorker(
 				"path", doc.Path,
 				"error", err,
 			)
-			failedChunkCount = len(chunkResults)
 			select {
 			case resultChan <- &fileResult{FilePath: doc.Path, Err: err}:
 			case <-ctx.Done():

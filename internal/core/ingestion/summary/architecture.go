@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -66,11 +65,11 @@ func (s *ArchitectureSummarizer) Generate(ctx context.Context, snapshotID uuid.U
 
 	allExist := true
 	for _, archType := range archTypes {
-		existing, err := s.summaryRepo.GetArchitectureSummary(ctx, snapshotID, archType)
-		if err != nil && !errors.Is(err, ErrNotFound) {
+		existingOpt, err := s.summaryRepo.GetArchitectureSummary(ctx, snapshotID, archType)
+		if err != nil {
 			return fmt.Errorf("failed to check existing summary for %s: %w", archType, err)
 		}
-		if existing == nil || existing.SourceHash != sourceHash {
+		if existingOpt.IsAbsent() || existingOpt.MustGet().SourceHash != sourceHash {
 			allExist = false
 			break
 		}
@@ -141,13 +140,14 @@ func (s *ArchitectureSummarizer) generateOne(
 	}
 
 	// 7. DBに保存（既存があれば更新、なければ作成）
-	existing, err := s.summaryRepo.GetArchitectureSummary(ctx, snapshotID, archType)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	existingOpt, err := s.summaryRepo.GetArchitectureSummary(ctx, snapshotID, archType)
+	if err != nil {
 		return fmt.Errorf("failed to check existing summary: %w", err)
 	}
 
 	var saved *Summary
-	if existing != nil {
+	if existingOpt.IsPresent() {
+		existing := existingOpt.MustGet()
 		// 既存の要約を更新
 		existing.Content = summaryContent
 		existing.ContentHash = contentHash

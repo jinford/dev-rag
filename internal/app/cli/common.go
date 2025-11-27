@@ -27,7 +27,7 @@ func NewAppContext(ctx context.Context, envFile string) (*AppContext, error) {
 	appLogger := logger.New(logger.DefaultConfig())
 
 	// コンテナの初期化（platform層を使用）
-	cont, err := container.NewContainer(ctx, appLogger, cfg)
+	cont, err := container.NewContainer(ctx, cfg, container.WithContainerLogger(appLogger))
 	if err != nil {
 		return nil, fmt.Errorf("コンテナの初期化に失敗: %w", err)
 	}

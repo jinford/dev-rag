@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // SearchResult はベクトル検索の結果を表す
@@ -67,11 +68,11 @@ type HybridSearchResult struct {
 
 // HybridSearchParams はハイブリッド検索のパラメータ
 // ProductIDとSnapshotIDの使い分け:
-// - ProductID が指定された場合: そのプロダクトに属する全スナップショットを横断検索
-// - ProductID が nil の場合: SnapshotID で指定された単一スナップショットのみを検索
+// - ProductID が Some の場合: そのプロダクトに属する全スナップショットを横断検索
+// - ProductID が None の場合: SnapshotID で指定された単一スナップショットのみを検索
 type HybridSearchParams struct {
-	ProductID     *uuid.UUID // プロダクト横断検索用（nilの場合はSnapshotID検索）
-	SnapshotID    uuid.UUID  // 単一スナップショット検索用
+	ProductID     mo.Option[uuid.UUID] // プロダクト横断検索用
+	SnapshotID    uuid.UUID            // 単一スナップショット検索用
 	Query         string
 	ChunkLimit    int
 	SummaryLimit  int

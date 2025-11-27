@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // ErrSnapshotVersionConflict はスナップショットのバージョン重複エラー
@@ -14,8 +15,8 @@ var ErrSnapshotVersionConflict = errors.New("snapshot version already exists")
 // テスト時のモック用に消費者側で定義
 type Repository interface {
 	// Product
-	GetProductByID(ctx context.Context, id uuid.UUID) (*Product, error)
-	GetProductByName(ctx context.Context, name string) (*Product, error)
+	GetProductByID(ctx context.Context, id uuid.UUID) (mo.Option[*Product], error)
+	GetProductByName(ctx context.Context, name string) (mo.Option[*Product], error)
 	ListProducts(ctx context.Context) ([]*Product, error)
 	ListProductsWithStats(ctx context.Context) ([]*ProductWithStats, error)
 	CreateProductIfNotExists(ctx context.Context, name string, description *string) (*Product, error)
@@ -23,25 +24,25 @@ type Repository interface {
 	DeleteProduct(ctx context.Context, id uuid.UUID) error
 
 	// Source
-	GetSourceByID(ctx context.Context, id uuid.UUID) (*Source, error)
-	GetSourceByName(ctx context.Context, name string) (*Source, error)
+	GetSourceByID(ctx context.Context, id uuid.UUID) (mo.Option[*Source], error)
+	GetSourceByName(ctx context.Context, name string) (mo.Option[*Source], error)
 	ListSourcesByProductID(ctx context.Context, productID uuid.UUID) ([]*Source, error)
 	CreateSourceIfNotExists(ctx context.Context, name string, sourceType SourceType, productID uuid.UUID, metadata SourceMetadata) (*Source, error)
 
 	// SourceSnapshot
-	GetSnapshotByVersion(ctx context.Context, sourceID uuid.UUID, versionIdentifier string) (*SourceSnapshot, error)
-	GetLatestIndexedSnapshot(ctx context.Context, sourceID uuid.UUID) (*SourceSnapshot, error)
+	GetSnapshotByVersion(ctx context.Context, sourceID uuid.UUID, versionIdentifier string) (mo.Option[*SourceSnapshot], error)
+	GetLatestIndexedSnapshot(ctx context.Context, sourceID uuid.UUID) (mo.Option[*SourceSnapshot], error)
 	ListSnapshotsBySource(ctx context.Context, sourceID uuid.UUID) ([]*SourceSnapshot, error)
 	CreateSnapshot(ctx context.Context, sourceID uuid.UUID, versionIdentifier string) (*SourceSnapshot, error)
 	MarkSnapshotIndexed(ctx context.Context, snapshotID uuid.UUID) error
 
 	// GitRef
-	GetGitRefByName(ctx context.Context, sourceID uuid.UUID, refName string) (*GitRef, error)
+	GetGitRefByName(ctx context.Context, sourceID uuid.UUID, refName string) (mo.Option[*GitRef], error)
 	ListGitRefsBySource(ctx context.Context, sourceID uuid.UUID) ([]*GitRef, error)
 	UpsertGitRef(ctx context.Context, sourceID uuid.UUID, refName string, snapshotID uuid.UUID) (*GitRef, error)
 
 	// File
-	GetFileByID(ctx context.Context, id uuid.UUID) (*File, error)
+	GetFileByID(ctx context.Context, id uuid.UUID) (mo.Option[*File], error)
 	ListFilesBySnapshot(ctx context.Context, snapshotID uuid.UUID) ([]*File, error)
 	GetFileHashesBySnapshot(ctx context.Context, snapshotID uuid.UUID) (map[string]string, error)
 	GetFilesByDomain(ctx context.Context, snapshotID uuid.UUID, domain string) ([]*File, error)
@@ -50,11 +51,11 @@ type Repository interface {
 	DeleteFilesByPaths(ctx context.Context, snapshotID uuid.UUID, paths []string) error
 
 	// Chunk
-	GetChunkByID(ctx context.Context, id uuid.UUID) (*Chunk, error)
+	GetChunkByID(ctx context.Context, id uuid.UUID) (mo.Option[*Chunk], error)
 	ListChunksByFile(ctx context.Context, fileID uuid.UUID) ([]*Chunk, error)
 	GetChunkContext(ctx context.Context, chunkID uuid.UUID, beforeCount int, afterCount int) ([]*Chunk, error)
 	GetChunkChildren(ctx context.Context, parentID uuid.UUID) ([]*Chunk, error)
-	GetChunkParent(ctx context.Context, chunkID uuid.UUID) (*Chunk, error)
+	GetChunkParent(ctx context.Context, chunkID uuid.UUID) (mo.Option[*Chunk], error)
 	GetChunkTree(ctx context.Context, rootID uuid.UUID, maxDepth int) ([]*Chunk, error)
 	CreateChunk(ctx context.Context, fileID uuid.UUID, ordinal int, startLine int, endLine int, content string, contentHash string, tokenCount int, metadata *ChunkMetadata) (*Chunk, error)
 	BatchCreateChunks(ctx context.Context, chunks []*Chunk) error

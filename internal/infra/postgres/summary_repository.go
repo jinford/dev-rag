@@ -12,6 +12,7 @@ import (
 	"github.com/jinford/dev-rag/internal/core/ingestion/summary"
 	"github.com/jinford/dev-rag/internal/infra/postgres/sqlc"
 	pgvector "github.com/pgvector/pgvector-go"
+	"github.com/samber/mo"
 )
 
 // SummaryRepository は summary.Repository インターフェースを実装する PostgreSQL リポジトリ
@@ -54,61 +55,81 @@ func (r *SummaryRepository) CreateSummary(ctx context.Context, s *summary.Summar
 	return convertSQLCSummary(sqlcSummary)
 }
 
-func (r *SummaryRepository) GetSummaryByID(ctx context.Context, id uuid.UUID) (*summary.Summary, error) {
+func (r *SummaryRepository) GetSummaryByID(ctx context.Context, id uuid.UUID) (mo.Option[*summary.Summary], error) {
 	sqlcSummary, err := r.q.GetSummaryByID(ctx, UUIDToPgtype(id))
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return nil, summary.ErrNotFound
+			return mo.None[*summary.Summary](), nil
 		}
-		return nil, fmt.Errorf("failed to get summary: %w", err)
+		return mo.None[*summary.Summary](), fmt.Errorf("failed to get summary: %w", err)
 	}
 
-	return convertSQLCSummary(sqlcSummary)
+	converted, err := convertSQLCSummary(sqlcSummary)
+	if err != nil {
+		return mo.None[*summary.Summary](), err
+	}
+
+	return mo.Some(converted), nil
 }
 
-func (r *SummaryRepository) GetFileSummary(ctx context.Context, snapshotID uuid.UUID, path string) (*summary.Summary, error) {
+func (r *SummaryRepository) GetFileSummary(ctx context.Context, snapshotID uuid.UUID, path string) (mo.Option[*summary.Summary], error) {
 	sqlcSummary, err := r.q.GetFileSummary(ctx, sqlc.GetFileSummaryParams{
 		SnapshotID: UUIDToPgtype(snapshotID),
 		TargetPath: path,
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return nil, summary.ErrNotFound
+			return mo.None[*summary.Summary](), nil
 		}
-		return nil, fmt.Errorf("failed to get file summary: %w", err)
+		return mo.None[*summary.Summary](), fmt.Errorf("failed to get file summary: %w", err)
 	}
 
-	return convertSQLCSummary(sqlcSummary)
+	converted, err := convertSQLCSummary(sqlcSummary)
+	if err != nil {
+		return mo.None[*summary.Summary](), err
+	}
+
+	return mo.Some(converted), nil
 }
 
-func (r *SummaryRepository) GetDirectorySummary(ctx context.Context, snapshotID uuid.UUID, path string) (*summary.Summary, error) {
+func (r *SummaryRepository) GetDirectorySummary(ctx context.Context, snapshotID uuid.UUID, path string) (mo.Option[*summary.Summary], error) {
 	sqlcSummary, err := r.q.GetDirectorySummary(ctx, sqlc.GetDirectorySummaryParams{
 		SnapshotID: UUIDToPgtype(snapshotID),
 		TargetPath: path,
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return nil, summary.ErrNotFound
+			return mo.None[*summary.Summary](), nil
 		}
-		return nil, fmt.Errorf("failed to get directory summary: %w", err)
+		return mo.None[*summary.Summary](), fmt.Errorf("failed to get directory summary: %w", err)
 	}
 
-	return convertSQLCSummary(sqlcSummary)
+	converted, err := convertSQLCSummary(sqlcSummary)
+	if err != nil {
+		return mo.None[*summary.Summary](), err
+	}
+
+	return mo.Some(converted), nil
 }
 
-func (r *SummaryRepository) GetArchitectureSummary(ctx context.Context, snapshotID uuid.UUID, archType summary.ArchType) (*summary.Summary, error) {
+func (r *SummaryRepository) GetArchitectureSummary(ctx context.Context, snapshotID uuid.UUID, archType summary.ArchType) (mo.Option[*summary.Summary], error) {
 	sqlcSummary, err := r.q.GetArchitectureSummary(ctx, sqlc.GetArchitectureSummaryParams{
 		SnapshotID: UUIDToPgtype(snapshotID),
 		ArchType:   archTypeToPgtext(&archType),
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return nil, summary.ErrNotFound
+			return mo.None[*summary.Summary](), nil
 		}
-		return nil, fmt.Errorf("failed to get architecture summary: %w", err)
+		return mo.None[*summary.Summary](), fmt.Errorf("failed to get architecture summary: %w", err)
 	}
 
-	return convertSQLCSummary(sqlcSummary)
+	converted, err := convertSQLCSummary(sqlcSummary)
+	if err != nil {
+		return mo.None[*summary.Summary](), err
+	}
+
+	return mo.Some(converted), nil
 }
 
 func (r *SummaryRepository) UpdateSummary(ctx context.Context, s *summary.Summary) error {
@@ -126,7 +147,7 @@ func (r *SummaryRepository) UpdateSummary(ctx context.Context, s *summary.Summar
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return summary.ErrNotFound
+			return fmt.Errorf("summary not found: %w", sql.ErrNoRows)
 		}
 		return fmt.Errorf("failed to update summary: %w", err)
 	}
@@ -138,7 +159,7 @@ func (r *SummaryRepository) DeleteSummary(ctx context.Context, id uuid.UUID) err
 	err := r.q.DeleteSummary(ctx, UUIDToPgtype(id))
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return summary.ErrNotFound
+			return fmt.Errorf("summary not found: %w", sql.ErrNoRows)
 		}
 		return fmt.Errorf("failed to delete summary: %w", err)
 	}
@@ -259,21 +280,21 @@ func (r *SummaryRepository) UpsertSummaryEmbedding(ctx context.Context, e *summa
 	return nil
 }
 
-func (r *SummaryRepository) GetSummaryEmbedding(ctx context.Context, summaryID uuid.UUID) (*summary.SummaryEmbedding, error) {
+func (r *SummaryRepository) GetSummaryEmbedding(ctx context.Context, summaryID uuid.UUID) (mo.Option[*summary.SummaryEmbedding], error) {
 	sqlcEmbedding, err := r.q.GetSummaryEmbedding(ctx, UUIDToPgtype(summaryID))
 	if err != nil {
 		if err == pgx.ErrNoRows || err == sql.ErrNoRows {
-			return nil, summary.ErrNotFound
+			return mo.None[*summary.SummaryEmbedding](), nil
 		}
-		return nil, fmt.Errorf("failed to get summary embedding: %w", err)
+		return mo.None[*summary.SummaryEmbedding](), fmt.Errorf("failed to get summary embedding: %w", err)
 	}
 
-	return &summary.SummaryEmbedding{
+	return mo.Some(&summary.SummaryEmbedding{
 		SummaryID: PgtypeToUUID(sqlcEmbedding.SummaryID),
 		Vector:    sqlcEmbedding.Vector.Slice(),
 		Model:     sqlcEmbedding.Model,
 		CreatedAt: PgtypeToTime(sqlcEmbedding.CreatedAt),
-	}, nil
+	}), nil
 }
 
 // === 検索 ===

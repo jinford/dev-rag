@@ -200,16 +200,6 @@ type ImportInfo struct {
 	External []string // 外部依存
 }
 
-// extractImports はインポート情報を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractImports(file *ast.File) []string {
-	var imports []string
-	for _, imp := range file.Imports {
-		path := strings.Trim(imp.Path.Value, `"`)
-		imports = append(imports, path)
-	}
-	return imports
-}
-
 // extractImportsDetailed はインポート情報を詳細に抽出します
 func (ac *ASTChunkerGo) extractImportsDetailed(file *ast.File) *ImportInfo {
 	info := &ImportInfo{
@@ -261,93 +251,6 @@ func (ac *ASTChunkerGo) isStandardLibrary(path string) bool {
 	}
 
 	return false
-}
-
-// extractFunction は関数・メソッドを抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractFunction(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) *ChunkWithMetadata {
-	chunk, _ := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunkCounter)
-	return chunk
-}
-
-// extractFunctionWithMetrics は関数・メソッドを抽出し、除外されたかどうかを返します
-// 大きな関数の場合はロジック単位に分割します
-func (ac *ASTChunkerGo) extractFunctionWithMetrics(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) (*ChunkWithMetadata, bool) {
-	startPos := ac.fset.Position(fn.Pos())
-	endPos := ac.fset.Position(fn.End())
-
-	content := ac.extractContent(lines, startPos.Line, endPos.Line)
-	tokens := chunkCounter.CountTokens(content)
-
-	// トークンサイズ検証
-	// AST解析の場合、意味のある単位（関数）であれば最小トークン数は10に緩和
-	// これにより小さな関数もチャンクとして抽出される
-	minTokensForAST := 10
-	if tokens < minTokensForAST || tokens > 1600 {
-		return nil, false
-	}
-
-	// メタデータ抽出
-	funcName := fn.Name.Name
-	funcType := "function"
-	var parentName *string
-	var signature string
-
-	// メソッドかどうか判定
-	if fn.Recv != nil && len(fn.Recv.List) > 0 {
-		funcType = "method"
-		recv := fn.Recv.List[0]
-		parentName = stringPtr(ac.extractTypeName(recv.Type))
-	}
-
-	// シグネチャを構築
-	signature = ac.buildFunctionSignature(fn)
-
-	// DocCommentを抽出
-	var docComment *string
-	if fn.Doc != nil {
-		doc := fn.Doc.Text()
-		docComment = &doc
-	}
-
-	// 関数内の呼び出しを抽出
-	calls := ac.extractFunctionCalls(fn)
-
-	// 品質メトリクス計測
-	loc := ac.calculateLinesOfCode(content)
-	commentRatio := ac.calculateCommentRatio(content)
-	complexity := ac.calculateCyclomaticComplexity(fn)
-
-	// コメント比率95%以上の場合は除外
-	if commentRatio > 0.95 {
-		return nil, true // 除外された
-	}
-
-	return &ChunkWithMetadata{
-		Chunk: &Chunk{
-			Content:   content,
-			StartLine: startPos.Line,
-			EndLine:   endPos.Line,
-			Tokens:    tokens,
-		},
-		Metadata: &ChunkMetadata{
-			Type:                 &funcType,
-			Name:                 &funcName,
-			ParentName:           parentName,
-			Signature:            &signature,
-			DocComment:           docComment,
-			Imports:              imports,
-			Calls:                calls,
-			LinesOfCode:          &loc,
-			CommentRatio:         &commentRatio,
-			CyclomaticComplexity: &complexity,
-		},
-	}, false // 除外されていない
 }
 
 // extractFunctionWithMetricsDetailed は関数・メソッドを抽出し、詳細な依存関係情報を含めます
@@ -432,50 +335,6 @@ func (ac *ASTChunkerGo) extractFunctionWithMetricsDetailed(fn *ast.FuncDecl, fil
 	}, false // 除外されていない
 }
 
-// extractFunctionWithLogicSplitting は関数を抽出し、必要に応じてロジック単位に分割します
-// レベル3ロジック単位チャンキング
-func (ac *ASTChunkerGo) extractFunctionWithLogicSplitting(fn *ast.FuncDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) ([]*ChunkWithMetadata, bool) {
-	// まず通常の関数チャンクを生成
-	funcChunk, excluded := ac.extractFunctionWithMetrics(fn, file, lines, imports, chunkCounter)
-	if funcChunk == nil {
-		return nil, excluded
-	}
-
-	chunks := []*ChunkWithMetadata{funcChunk}
-
-	// ロジック分割が必要かチェック
-	logicChunker := NewLogicChunker(ac.fset)
-	config := DefaultSplitConfig()
-
-	complexity := 0
-	if funcChunk.Metadata.CyclomaticComplexity != nil {
-		complexity = *funcChunk.Metadata.CyclomaticComplexity
-	}
-
-	if !logicChunker.ShouldSplit(fn, complexity, config) {
-		// 分割不要の場合は関数チャンクのみを返す
-		return chunks, excluded
-	}
-
-	// ロジック単位に分割
-	logicBlocks := logicChunker.SplitIntoLogicBlocks(fn, lines, config)
-	if len(logicBlocks) == 0 {
-		// ブロックが見つからない場合は関数チャンクのみを返す
-		return chunks, excluded
-	}
-
-	// 孫チャンクを生成
-	logicChunks := logicChunker.GenerateLogicChunks(fn, funcChunk.Metadata, lines, logicBlocks, chunkCounter, config)
-
-	// 孫チャンクを追加
-	chunks = append(chunks, logicChunks...)
-
-	return chunks, excluded
-}
-
 // extractFunctionWithLogicSplittingDetailed は関数を抽出し、必要に応じてロジック単位に分割します（詳細版）
 // 詳細な依存関係情報を含む
 func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface {
@@ -520,50 +379,6 @@ func (ac *ASTChunkerGo) extractFunctionWithLogicSplittingDetailed(fn *ast.FuncDe
 	return chunks, excluded
 }
 
-// extractGenDecl は型定義、変数、定数を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractGenDecl(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) []*ChunkWithMetadata {
-	chunks, _ := ac.extractGenDeclWithMetrics(decl, file, lines, imports, chunkCounter)
-	return chunks
-}
-
-// extractGenDeclWithMetrics は型定義、変数、定数を抽出し、除外数を返します
-func (ac *ASTChunkerGo) extractGenDeclWithMetrics(decl *ast.GenDecl, file *ast.File, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) ([]*ChunkWithMetadata, int) {
-	var chunks []*ChunkWithMetadata
-	excludedCount := 0
-
-	// 各specを処理
-	for _, spec := range decl.Specs {
-		switch s := spec.(type) {
-		case *ast.TypeSpec:
-			// 型定義を処理
-			chunk, excluded := ac.extractTypeSpecWithMetrics(s, decl, lines, imports, chunkCounter)
-			if chunk != nil {
-				chunks = append(chunks, chunk)
-			}
-			if excluded {
-				excludedCount++
-			}
-		case *ast.ValueSpec:
-			// 変数・定数を処理
-			chunk, excluded := ac.extractValueSpecWithMetrics(s, decl, lines, imports, chunkCounter)
-			if chunk != nil {
-				chunks = append(chunks, chunk)
-			}
-			if excluded {
-				excludedCount++
-			}
-		}
-	}
-
-	return chunks, excludedCount
-}
-
 // extractGenDeclWithMetricsDetailed は型定義、変数、定数を抽出し、除外数を返します（詳細版）
 func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, file *ast.File, lines []string, importInfo *ImportInfo, chunkCounter interface {
 	CountTokens(string) int
@@ -597,79 +412,6 @@ func (ac *ASTChunkerGo) extractGenDeclWithMetricsDetailed(decl *ast.GenDecl, fil
 	}
 
 	return chunks, excludedCount
-}
-
-// extractTypeSpec は型定義を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractTypeSpec(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) *ChunkWithMetadata {
-	chunk, _ := ac.extractTypeSpecWithMetrics(spec, decl, lines, imports, chunkCounter)
-	return chunk
-}
-
-// extractTypeSpecWithMetrics は型定義を抽出し、除外されたかどうかを返します
-func (ac *ASTChunkerGo) extractTypeSpecWithMetrics(spec *ast.TypeSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) (*ChunkWithMetadata, bool) {
-	startPos := ac.fset.Position(decl.Pos())
-	endPos := ac.fset.Position(decl.End())
-
-	content := ac.extractContent(lines, startPos.Line, endPos.Line)
-	tokens := chunkCounter.CountTokens(content)
-
-	// トークンサイズ検証
-	// 型定義は最小トークン数5に緩和（小さなstructも含める）
-	minTokensForAST := 5
-	if tokens < minTokensForAST || tokens > 1600 {
-		return nil, false
-	}
-
-	typeName := spec.Name.Name
-	var typeKind string
-
-	switch spec.Type.(type) {
-	case *ast.StructType:
-		typeKind = "struct"
-	case *ast.InterfaceType:
-		typeKind = "interface"
-	default:
-		typeKind = "type"
-	}
-
-	// DocCommentを抽出
-	var docComment *string
-	if decl.Doc != nil {
-		doc := decl.Doc.Text()
-		docComment = &doc
-	}
-
-	// 品質メトリクス計測
-	loc := ac.calculateLinesOfCode(content)
-	commentRatio := ac.calculateCommentRatio(content)
-
-	// コメント比率95%以上の場合は除外
-	if commentRatio > 0.95 {
-		return nil, true // 除外された
-	}
-
-	return &ChunkWithMetadata{
-		Chunk: &Chunk{
-			Content:   content,
-			StartLine: startPos.Line,
-			EndLine:   endPos.Line,
-			Tokens:    tokens,
-		},
-		Metadata: &ChunkMetadata{
-			Type:         &typeKind,
-			Name:         &typeName,
-			DocComment:   docComment,
-			Imports:      imports,
-			LinesOfCode:  &loc,
-			CommentRatio: &commentRatio,
-		},
-	}, false // 除外されていない
 }
 
 // extractTypeSpecWithMetricsDetailed は型定義を抽出し、詳細な依存関係情報を含めます
@@ -734,82 +476,6 @@ func (ac *ASTChunkerGo) extractTypeSpecWithMetricsDetailed(spec *ast.TypeSpec, d
 			// 詳細な依存関係情報
 			StandardImports: importInfo.Standard,
 			ExternalImports: importInfo.External,
-		},
-	}, false // 除外されていない
-}
-
-// extractValueSpec は変数・定数を抽出します（後方互換性のため）
-func (ac *ASTChunkerGo) extractValueSpec(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) *ChunkWithMetadata {
-	chunk, _ := ac.extractValueSpecWithMetrics(spec, decl, lines, imports, chunkCounter)
-	return chunk
-}
-
-// extractValueSpecWithMetrics は変数・定数を抽出し、除外されたかどうかを返します
-func (ac *ASTChunkerGo) extractValueSpecWithMetrics(spec *ast.ValueSpec, decl *ast.GenDecl, lines []string, imports []string, chunkCounter interface {
-	CountTokens(string) int
-	TrimToTokenLimit(string, int) string
-}) (*ChunkWithMetadata, bool) {
-	startPos := ac.fset.Position(decl.Pos())
-	endPos := ac.fset.Position(decl.End())
-
-	content := ac.extractContent(lines, startPos.Line, endPos.Line)
-	tokens := chunkCounter.CountTokens(content)
-
-	// トークンサイズ検証
-	// 変数・定数は最小トークン数10に緩和
-	minTokensForAST := 10
-	if tokens < minTokensForAST || tokens > 1600 {
-		return nil, false
-	}
-
-	// 名前を抽出（複数の変数が同時に宣言されている場合は最初の名前を使用）
-	var name string
-	if len(spec.Names) > 0 {
-		name = spec.Names[0].Name
-	} else {
-		return nil, false
-	}
-
-	var typeKind string
-	if decl.Tok == token.CONST {
-		typeKind = "const"
-	} else {
-		typeKind = "var"
-	}
-
-	// DocCommentを抽出
-	var docComment *string
-	if decl.Doc != nil {
-		doc := decl.Doc.Text()
-		docComment = &doc
-	}
-
-	// 品質メトリクス計測
-	loc := ac.calculateLinesOfCode(content)
-	commentRatio := ac.calculateCommentRatio(content)
-
-	// コメント比率95%以上の場合は除外
-	if commentRatio > 0.95 {
-		return nil, true // 除外された
-	}
-
-	return &ChunkWithMetadata{
-		Chunk: &Chunk{
-			Content:   content,
-			StartLine: startPos.Line,
-			EndLine:   endPos.Line,
-			Tokens:    tokens,
-		},
-		Metadata: &ChunkMetadata{
-			Type:         &typeKind,
-			Name:         &name,
-			DocComment:   docComment,
-			Imports:      imports,
-			LinesOfCode:  &loc,
-			CommentRatio: &commentRatio,
 		},
 	}, false // 除外されていない
 }
@@ -1083,7 +749,7 @@ func (ac *ASTChunkerGo) calculateCyclomaticComplexity(fn *ast.FuncDecl) int {
 	complexity := 1 // ベースライン
 
 	ast.Inspect(fn, func(n ast.Node) bool {
-		switch n.(type) {
+		switch n := n.(type) {
 		case *ast.IfStmt:
 			complexity++
 		case *ast.ForStmt:
@@ -1096,10 +762,8 @@ func (ac *ASTChunkerGo) calculateCyclomaticComplexity(fn *ast.FuncDecl) int {
 			complexity++
 		case *ast.BinaryExpr:
 			// && や || は分岐点としてカウント
-			if expr, ok := n.(*ast.BinaryExpr); ok {
-				if expr.Op == token.LAND || expr.Op == token.LOR {
-					complexity++
-				}
+			if n.Op == token.LAND || n.Op == token.LOR {
+				complexity++
 			}
 		}
 		return true

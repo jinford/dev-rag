@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -222,45 +221,48 @@ func (s *DirectorySummarizer) GenerateIfChanged(ctx context.Context, snapshotID 
 	// 配下のファイル要約を取得
 	var fileSummaryHashes []string
 	for _, file := range dir.Files {
-		summary, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
+		summaryOpt, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				s.logger.Debug("file summary not found, skipping",
-					"path", file.Path,
-					"directory", dir.Path)
-				continue
-			}
 			return nil, false, fmt.Errorf("failed to get file summary for %s: %w", file.Path, err)
 		}
-		fileSummaryHashes = append(fileSummaryHashes, summary.ContentHash)
+		if summaryOpt.IsAbsent() {
+			s.logger.Debug("file summary not found, skipping",
+				"path", file.Path,
+				"directory", dir.Path)
+			continue
+		}
+		fileSummaryHashes = append(fileSummaryHashes, summaryOpt.MustGet().ContentHash)
 	}
 
 	// サブディレクトリ要約を取得
 	var subdirSummaryHashes []string
 	for _, subdirPath := range dir.Subdirectories {
-		summary, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, subdirPath)
+		summaryOpt, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, subdirPath)
 		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				s.logger.Debug("subdirectory summary not found, skipping",
-					"path", subdirPath,
-					"directory", dir.Path)
-				continue
-			}
 			return nil, false, fmt.Errorf("failed to get directory summary for %s: %w", subdirPath, err)
 		}
-		subdirSummaryHashes = append(subdirSummaryHashes, summary.ContentHash)
+		if summaryOpt.IsAbsent() {
+			s.logger.Debug("subdirectory summary not found, skipping",
+				"path", subdirPath,
+				"directory", dir.Path)
+			continue
+		}
+		subdirSummaryHashes = append(subdirSummaryHashes, summaryOpt.MustGet().ContentHash)
 	}
 
 	// source_hashを計算
 	sourceHash := s.hasher.HashDirectorySource(fileSummaryHashes, subdirSummaryHashes)
 
 	// 既存の要約を確認
-	existing, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, dir.Path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	existingOpt, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, dir.Path)
+	if err != nil {
 		return nil, false, fmt.Errorf("failed to get existing summary: %w", err)
 	}
-	if existing != nil && existing.SourceHash == sourceHash {
-		return existing, false, nil
+	if existingOpt.IsPresent() {
+		existing := existingOpt.MustGet()
+		if existing.SourceHash == sourceHash {
+			return existing, false, nil
+		}
 	}
 
 	// 要約を生成
@@ -283,21 +285,27 @@ func (s *DirectorySummarizer) Generate(
 	// 1. ファイル要約を収集
 	var fileSummaries []string
 	for _, file := range dir.Files {
-		summary, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
+		summaryOpt, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
 		if err != nil {
 			continue
 		}
-		fileSummaries = append(fileSummaries, fmt.Sprintf("- %s: %s", filepath.Base(file.Path), summary.Content))
+		if summaryOpt.IsAbsent() {
+			continue
+		}
+		fileSummaries = append(fileSummaries, fmt.Sprintf("- %s: %s", filepath.Base(file.Path), summaryOpt.MustGet().Content))
 	}
 
 	// 2. サブディレクトリ要約を収集
 	var subdirSummaries []string
 	for _, subdirPath := range dir.Subdirectories {
-		summary, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, subdirPath)
+		summaryOpt, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, subdirPath)
 		if err != nil {
 			continue
 		}
-		subdirSummaries = append(subdirSummaries, fmt.Sprintf("- %s: %s", filepath.Base(subdirPath), summary.Content))
+		if summaryOpt.IsAbsent() {
+			continue
+		}
+		subdirSummaries = append(subdirSummaries, fmt.Sprintf("- %s: %s", filepath.Base(subdirPath), summaryOpt.MustGet().Content))
 	}
 
 	// 3. プロンプトを構築
@@ -340,13 +348,14 @@ func (s *DirectorySummarizer) Generate(
 	}
 
 	// 9. DBに保存（既存があれば更新、なければ作成）
-	existing, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, dir.Path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	existingOpt, err := s.summaryRepo.GetDirectorySummary(ctx, snapshotID, dir.Path)
+	if err != nil {
 		return nil, fmt.Errorf("failed to check existing summary: %w", err)
 	}
 
 	var saved *Summary
-	if existing != nil {
+	if existingOpt.IsPresent() {
+		existing := existingOpt.MustGet()
 		// 既存の要約を更新
 		existing.Content = summaryContent
 		existing.ContentHash = contentHash

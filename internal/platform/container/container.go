@@ -37,8 +37,86 @@ type ServiceContainer struct {
 	database *database.Database
 }
 
-// NewContainer は設定とロガーからコンテナを生成する。
-func NewContainer(ctx context.Context, logger *slog.Logger, cfg *config.Config) (*ServiceContainer, error) {
+type containerOptions struct {
+	logger           *slog.Logger
+	embedder         coreingestion.Embedder
+	sourceProvider   coreingestion.SourceProvider
+	chunkerFactory   chunk.ChunkerFactory
+	languageDetector chunk.LanguageDetector
+	tokenCounter     chunk.TokenCounter
+	llmClient        corewiki.LLMClient
+	wikiRepo         corewiki.Repository
+	wikiFileReader   corewiki.FileReader
+}
+
+// ContainerOption は ServiceContainer 構築時のオプション
+type ContainerOption func(*containerOptions)
+
+// WithContainerLogger はロガーを差し替える
+func WithContainerLogger(logger *slog.Logger) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.logger = logger
+	}
+}
+
+// WithContainerEmbedder はカスタム Embedder を注入する
+func WithContainerEmbedder(embedder coreingestion.Embedder) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.embedder = embedder
+	}
+}
+
+// WithContainerSourceProvider は SourceProvider を差し替える
+func WithContainerSourceProvider(provider coreingestion.SourceProvider) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.sourceProvider = provider
+	}
+}
+
+// WithContainerChunkerFactory は ChunkerFactory を差し替える
+func WithContainerChunkerFactory(factory chunk.ChunkerFactory) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.chunkerFactory = factory
+	}
+}
+
+// WithContainerLanguageDetector は LanguageDetector を差し替える
+func WithContainerLanguageDetector(detector chunk.LanguageDetector) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.languageDetector = detector
+	}
+}
+
+// WithContainerTokenCounter は TokenCounter を差し替える
+func WithContainerTokenCounter(counter chunk.TokenCounter) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.tokenCounter = counter
+	}
+}
+
+// WithContainerLLMClient は LLM クライアントを差し替える
+func WithContainerLLMClient(client corewiki.LLMClient) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.llmClient = client
+	}
+}
+
+// WithContainerWikiRepository は Wiki リポジトリを差し替える
+func WithContainerWikiRepository(repo corewiki.Repository) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.wikiRepo = repo
+	}
+}
+
+// WithContainerWikiFileReader は Wiki 用ファイルリーダーを差し替える
+func WithContainerWikiFileReader(reader corewiki.FileReader) ContainerOption {
+	return func(opts *containerOptions) {
+		opts.wikiFileReader = reader
+	}
+}
+
+// NewContainer は設定からコンテナを生成する。
+func NewContainer(ctx context.Context, cfg *config.Config, opts ...ContainerOption) (*ServiceContainer, error) {
 	db, err := database.New(ctx, database.ConnectionParams{
 		Host:     cfg.Database.Host,
 		Port:     cfg.Database.Port,
@@ -51,32 +129,58 @@ func NewContainer(ctx context.Context, logger *slog.Logger, cfg *config.Config) 
 		return nil, fmt.Errorf("データベース初期化に失敗しました: %w", err)
 	}
 
-	return NewContainerWithDB(logger, cfg, db)
+	return NewContainerWithDB(cfg, db, opts...)
 }
 
 // NewContainerWithDB は既存の Database を受け取りコンテナを生成する。
-func NewContainerWithDB(logger *slog.Logger, cfg *config.Config, db *database.Database) (*ServiceContainer, error) {
-	if logger == nil {
-		logger = slog.Default()
+func NewContainerWithDB(cfg *config.Config, db *database.Database, opts ...ContainerOption) (*ServiceContainer, error) {
+	options := containerOptions{logger: slog.Default()}
+	for _, opt := range opts {
+		opt(&options)
+	}
+	if options.logger == nil {
+		options.logger = slog.Default()
 	}
 
 	// Embedder (OpenAI)
-	embedder := openai.NewEmbedder(cfg.OpenAI.APIKey, cfg.OpenAI.EmbeddingModel, cfg.OpenAI.EmbeddingDimension)
+	embedder := options.embedder
+	if embedder == nil {
+		embedder = openai.NewEmbedder(
+			cfg.OpenAI.APIKey,
+			openai.WithEmbeddingModel(cfg.OpenAI.EmbeddingModel),
+			openai.WithEmbeddingDimension(cfg.OpenAI.EmbeddingDimension),
+		)
+	}
 
 	// SourceProvider (Git)
-	gitClient := git.NewClient(cfg.Git.SSHKeyPath, cfg.Git.SSHPassword)
-	sourceProvider := git.NewProvider(gitClient, cfg.Git.CloneDir, cfg.Git.DefaultBranch)
+	sourceProvider := options.sourceProvider
+	if sourceProvider == nil {
+		gitClient := git.NewClient(cfg.Git.SSHKeyPath, cfg.Git.SSHPassword)
+		sourceProvider = git.NewProvider(gitClient, cfg.Git.CloneDir, cfg.Git.DefaultBranch)
+	}
 
 	// Chunker / Detector / TokenCounter
-	defaultChunker, err := chunk.NewDefaultChunker()
-	if err != nil {
-		return nil, fmt.Errorf("Chunker 初期化に失敗しました: %w", err)
+	chunkerFactory := options.chunkerFactory
+	if chunkerFactory == nil {
+		defaultChunker, err := chunk.NewDefaultChunker()
+		if err != nil {
+			return nil, fmt.Errorf("Chunker 初期化に失敗しました: %w", err)
+		}
+		chunkerFactory = &defaultChunkerFactory{base: defaultChunker}
 	}
-	chunkerFactory := &defaultChunkerFactory{base: defaultChunker}
-	langDetector := &languageDetectorAdapter{detector: coreingestion.NewContentTypeDetector()}
-	tokenCounter, err := newTokenCounter()
-	if err != nil {
-		return nil, fmt.Errorf("TokenCounter 初期化に失敗しました: %w", err)
+
+	langDetector := options.languageDetector
+	if langDetector == nil {
+		langDetector = &languageDetectorAdapter{detector: coreingestion.NewContentTypeDetector()}
+	}
+
+	tokenCounter := options.tokenCounter
+	if tokenCounter == nil {
+		var err error
+		tokenCounter, err = newTokenCounter()
+		if err != nil {
+			return nil, fmt.Errorf("TokenCounter 初期化に失敗しました: %w", err)
+		}
 	}
 
 	// Repository (PostgreSQL)
@@ -87,43 +191,53 @@ func NewContainerWithDB(logger *slog.Logger, cfg *config.Config, db *database.Da
 	summaryRepo := postgres.NewSummaryRepository(indexQueries)
 
 	// LLMClient (OpenAI)
-	openaiLLMClient, err := openai.NewClientWithAPIKey(cfg.OpenAI.APIKey, cfg.OpenAI.LLMModel)
-	if err != nil {
-		return nil, fmt.Errorf("OpenAI LLMクライアント初期化に失敗しました: %w", err)
+	llmClient := options.llmClient
+	if llmClient == nil {
+		openaiLLMClient, err := openai.NewClientWithAPIKey(cfg.OpenAI.APIKey, cfg.OpenAI.LLMModel)
+		if err != nil {
+			return nil, fmt.Errorf("OpenAI LLMクライアント初期化に失敗しました: %w", err)
+		}
+		llmClient = openaiLLMClient
 	}
 
 	// IndexService
-	indexService := coreingestion.NewIndexService(coreingestion.IndexServiceConfig{
-		Repository:     indexRepo,
-		SourceProvider: sourceProvider,
-		Embedder:       embedder,
-		LLMClient:      nil,
-		ChunkerFactory: chunkerFactory,
-		LanguageDetect: langDetector,
-		TokenCounter:   tokenCounter,
-		ChunkerConfig:  chunk.DefaultChunkerConfig(),
-		Logger:         logger,
-	})
+	indexService := coreingestion.NewIndexService(
+		indexRepo,
+		sourceProvider,
+		embedder,
+		chunkerFactory,
+		langDetector,
+		tokenCounter,
+		coreingestion.WithIndexLogger(options.logger),
+	)
 
 	// SummaryService
 	summaryService := summary.NewSummaryService(
 		indexRepo,
 		summaryRepo,
-		openaiLLMClient,
+		llmClient,
 		embedder,
-		logger,
+		summary.WithSummaryLogger(options.logger),
 	)
 
 	// SearchService（新コア用リポジトリ）
 	searchQueries := indexsqlc.New(db.Pool)
 	searchRepo := postgres.NewSearchRepository(searchQueries)
-	searchService := coresearch.NewSearchService(searchRepo, embedder)
+	searchService := coresearch.NewSearchService(searchRepo, embedder, coresearch.WithSearchLogger(options.logger))
 
 	// WikiService（実際のOpenAIクライアントを使用）
-	wikiService := corewiki.NewWikiService(searchService, &wikiRepositoryStub{}, openaiLLMClient, &wikiFileReaderStub{}, logger)
+	wikiRepo := options.wikiRepo
+	if wikiRepo == nil {
+		wikiRepo = &wikiRepositoryStub{}
+	}
+	wikiReader := options.wikiFileReader
+	if wikiReader == nil {
+		wikiReader = &wikiFileReaderStub{}
+	}
+	wikiService := corewiki.NewWikiService(searchService, wikiRepo, llmClient, wikiReader, corewiki.WithWikiLogger(options.logger))
 
 	// AskService
-	askService := coreask.NewAskService(searchService, openaiLLMClient, logger)
+	askService := coreask.NewAskService(searchService, llmClient, coreask.WithAskLogger(options.logger))
 
 	return &ServiceContainer{
 		IndexService:      indexService,
@@ -133,7 +247,7 @@ func NewContainerWithDB(logger *slog.Logger, cfg *config.Config, db *database.Da
 		AskService:        askService,
 		IngestionRepo:     indexRepo,
 		SummaryRepository: summaryRepo,
-		logger:            logger,
+		logger:            options.logger,
 		database:          db,
 	}, nil
 }

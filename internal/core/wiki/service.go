@@ -26,30 +26,47 @@ type WikiService struct {
 	logger        *slog.Logger
 }
 
+// WikiServiceOption は WikiService のオプション設定
+type WikiServiceOption func(*WikiService)
+
+// WithWikiLogger は WikiService にロガーを設定する
+func WithWikiLogger(logger *slog.Logger) WikiServiceOption {
+	return func(s *WikiService) {
+		s.logger = logger
+	}
+}
+
 // NewWikiService は新しいWikiServiceを作成する
 func NewWikiService(
 	searchService *search.SearchService,
 	repo Repository,
 	llm LLMClient,
 	fileReader FileReader,
-	logger *slog.Logger,
+	opts ...WikiServiceOption,
 ) *WikiService {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &WikiService{
+	svc := &WikiService{
 		searchService: searchService,
 		repo:          repo,
 		llm:           llm,
 		fileReader:    fileReader,
-		logger:        logger,
+		logger:        slog.Default(),
 	}
+
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
+
+	return svc
 }
 
 // Generate はWikiを生成する
 func (s *WikiService) Generate(ctx context.Context, params GenerateParams) error {
 	// バリデーション: ProductIDまたはSnapshotIDのいずれかが必須
-	if params.ProductID == nil && params.SnapshotID == uuid.Nil {
+	if params.ProductID.IsAbsent() && params.SnapshotID == uuid.Nil {
 		return fmt.Errorf("either productID or snapshotID is required")
 	}
 	if params.OutputDir == "" {
@@ -142,7 +159,7 @@ func (s *WikiService) searchContext(
 
 	// ProductIDが指定されている場合はプロダクト横断検索、
 	// それ以外はSnapshotID検索
-	if params.ProductID != nil {
+	if params.ProductID.IsPresent() {
 		searchParams.ProductID = params.ProductID
 	} else {
 		searchParams.SnapshotID = params.SnapshotID

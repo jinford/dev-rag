@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // WikiMetadata はWiki生成の実行履歴とメタデータを表す
@@ -86,7 +87,7 @@ type WikiPage struct {
 // - ProductID が指定された場合: そのプロダクトに属する全スナップショットを横断してWiki生成
 // - ProductID が nil の場合: SnapshotID で指定された単一スナップショットのみでWiki生成
 type GenerateParams struct {
-	ProductID  *uuid.UUID // プロダクト単位Wiki生成（nilの場合はSnapshotID使用）
-	SnapshotID uuid.UUID  // 単一スナップショットWiki生成
+	ProductID  mo.Option[uuid.UUID] // プロダクト単位Wiki生成（Noneの場合はSnapshotID使用）
+	SnapshotID uuid.UUID            // 単一スナップショットWiki生成
 	OutputDir  string
 }

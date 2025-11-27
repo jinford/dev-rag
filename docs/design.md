@@ -58,6 +58,25 @@ graph TB
 
 本システムは以下のコンポーネントで構成される：
 
+### 1.3 Option / Functional Options ガイドライン
+
+- 取得系のリポジトリ/サービスは「存在しない」状態を `mo.Option` の `None` で返却し、`err == nil` のときに `nil` ポインタを返さないことを契約とする。
+- 呼び出し側は `IsPresent/IsAbsent` を基本とし、事前検証済みのケースのみ `MustGet` を許容する。
+- コンストラクタは必須依存のみ位置引数に残し、任意の注入は `With...` 形式の Functional Options で指定する。デフォルト値はオプション適用時に確定させる。
+- 簡易例：
+
+```go
+productOpt, _ := repo.GetProductByName(ctx, "ecommerce")
+if productOpt.IsAbsent() { /* 404 ハンドリング */ }
+
+svc := ingestion.NewIndexService(
+    repo, provider, embedder, factory, detector, counter,
+    ingestion.WithIndexLogger(logger),
+)
+
+cont, _ := container.NewContainer(ctx, cfg, container.WithContainerLogger(logger))
+```
+
 1. **HTTP サーバ**（Go実装、ポート 8080）
    - REST API エンドポイント提供
    - 非同期ジョブ管理（Goルーチン）

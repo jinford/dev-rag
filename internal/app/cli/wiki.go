@@ -8,6 +8,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	corewiki "github.com/jinford/dev-rag/internal/core/wiki"
+	"github.com/samber/mo"
 )
 
 // WikiGenerateAction はプロダクト単位でWikiを生成するコマンドのアクション
@@ -52,10 +53,14 @@ func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName,
 
 	// 1. プロダクト名からプロダクトを取得
 	slog.Info("プロダクトを取得します", "product", productName)
-	product, err := repo.GetProductByName(ctx, productName)
+	productOpt, err := repo.GetProductByName(ctx, productName)
 	if err != nil {
 		return fmt.Errorf("プロダクト取得に失敗: %w", err)
 	}
+	if productOpt.IsAbsent() {
+		return fmt.Errorf("プロダクトが見つかりません: %s", productName)
+	}
+	product := productOpt.MustGet()
 
 	slog.Info("プロダクトを取得しました", "productID", product.ID, "productName", product.Name)
 
@@ -63,7 +68,7 @@ func executeWikiGeneration(ctx context.Context, appCtx *AppContext, productName,
 	productOutputDir := fmt.Sprintf("%s/%s", outputDir, product.Name)
 
 	params := corewiki.GenerateParams{
-		ProductID: &product.ID,
+		ProductID: mo.Some(product.ID),
 		OutputDir: productOutputDir,
 	}
 

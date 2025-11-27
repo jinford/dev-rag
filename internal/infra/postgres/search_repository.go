@@ -2,10 +2,14 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	pgvector "github.com/pgvector/pgvector-go"
+	"github.com/samber/mo"
 
 	"github.com/jinford/dev-rag/internal/core/search"
 	"github.com/jinford/dev-rag/internal/infra/postgres/sqlc"
@@ -129,12 +133,15 @@ func (r *SearchRepository) GetChunkContext(ctx context.Context, chunkID uuid.UUI
 	return chunks, nil
 }
 
-func (r *SearchRepository) GetParentChunk(ctx context.Context, chunkID uuid.UUID) (*search.ChunkContext, error) {
+func (r *SearchRepository) GetParentChunk(ctx context.Context, chunkID uuid.UUID) (mo.Option[*search.ChunkContext], error) {
 	row, err := r.q.GetParentChunk(ctx, UUIDToPgtype(chunkID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to get parent chunk: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*search.ChunkContext](), nil
+		}
+		return mo.None[*search.ChunkContext](), fmt.Errorf("failed to get parent chunk: %w", err)
 	}
-	return convertSearchChunk(row), nil
+	return mo.Some(convertSearchChunk(row)), nil
 }
 
 func (r *SearchRepository) GetChildChunks(ctx context.Context, chunkID uuid.UUID) ([]*search.ChunkContext, error) {

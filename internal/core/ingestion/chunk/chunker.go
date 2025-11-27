@@ -55,13 +55,13 @@ type ChunkMetadata struct {
 	DocComment *string // ドキュメントコメント
 
 	// 依存関係情報
-	Imports           []string // インポート一覧
-	Calls             []string // 関数呼び出し一覧
-	StandardImports   []string // 標準ライブラリインポート
-	ExternalImports   []string // 外部依存インポート
-	InternalCalls     []string // 内部関数呼び出し
-	ExternalCalls     []string // 外部関数呼び出し
-	TypeDependencies  []string // 型依存
+	Imports          []string // インポート一覧
+	Calls            []string // 関数呼び出し一覧
+	StandardImports  []string // 標準ライブラリインポート
+	ExternalImports  []string // 外部依存インポート
+	InternalCalls    []string // 内部関数呼び出し
+	ExternalCalls    []string // 外部関数呼び出し
+	TypeDependencies []string // 型依存
 
 	// コード品質メトリクス
 	LinesOfCode          *int     // コード行数

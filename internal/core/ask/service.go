@@ -20,20 +20,36 @@ type AskService struct {
 	logger        *slog.Logger
 }
 
+type AskServiceOption func(*AskService)
+
+// WithAskLogger は AskService にロガーを設定する
+func WithAskLogger(logger *slog.Logger) AskServiceOption {
+	return func(s *AskService) {
+		s.logger = logger
+	}
+}
+
 // NewAskService は新しいAskServiceを作成する
 func NewAskService(
 	searchService *search.SearchService,
 	llm LLMClient,
-	logger *slog.Logger,
+	opts ...AskServiceOption,
 ) *AskService {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &AskService{
+	svc := &AskService{
 		searchService: searchService,
 		llm:           llm,
-		logger:        logger,
+		logger:        slog.Default(),
 	}
+
+	for _, opt := range opts {
+		opt(svc)
+	}
+
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
+
+	return svc
 }
 
 // Ask は質問に対してRAGベースで回答を生成する
@@ -42,7 +58,7 @@ func (s *AskService) Ask(ctx context.Context, params AskParams) (*AskResult, err
 	if params.Query == "" {
 		return nil, fmt.Errorf("query is required")
 	}
-	if params.ProductID == nil {
+	if params.ProductID.IsAbsent() {
 		return nil, fmt.Errorf("productID is required")
 	}
 
@@ -65,7 +81,7 @@ func (s *AskService) Ask(ctx context.Context, params AskParams) (*AskResult, err
 	}
 
 	s.logger.Info("executing hybrid search",
-		"productID", params.ProductID.String(),
+		"productID", params.ProductID.MustGet().String(),
 		"query", params.Query,
 		"chunkLimit", chunkLimit,
 		"summaryLimit", summaryLimit,

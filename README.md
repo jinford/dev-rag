@@ -26,6 +26,36 @@ dev-ragは、複数の情報ソース（Git、Confluence、PDF等）のコード
 - **Webフレームワーク**: Echo v4
 - **CLI**: urfave/cli/v3
 
+## Option / Functional Options ポリシー
+
+- 取得系メソッドは「存在しない」を `mo.Option` の `None` で表現し、`err == nil` のときは必ず `Some` か `None` のどちらかを返します（成功時に `nil` ポインタを返さない）。
+- 呼び出し側は `IsPresent/IsAbsent` を基本とし、`MustGet` はバリデーション後の前提違反に限定して利用します。
+- コンストラクタは必須依存を位置引数、任意設定を Functional Options (`With...`) で渡します。デフォルト値はオプション適用時に設定されます。
+- 例: `GetProductByName` での取得と `NewIndexService`/`NewContainer` の呼び出し
+
+```go
+productOpt, err := repo.GetProductByName(ctx, "ecommerce")
+if err != nil {
+    return err
+}
+if productOpt.IsAbsent() {
+    return fmt.Errorf("プロダクトが見つかりません")
+}
+product := productOpt.MustGet()
+
+indexSvc := ingestion.NewIndexService(
+    repo,
+    provider,
+    embedder,
+    chunkerFactory,
+    detector,
+    tokenCounter,
+    ingestion.WithIndexLogger(logger),
+)
+
+container, err := container.NewContainer(ctx, cfg, container.WithContainerLogger(logger))
+```
+
 ## セットアップ
 
 ### 前提条件

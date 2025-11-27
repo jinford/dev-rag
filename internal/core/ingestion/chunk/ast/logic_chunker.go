@@ -68,10 +68,6 @@ type LogicBlock struct {
 // SplitIntoLogicBlocks は関数を論理ブロックに分割します
 // 意味のあるまとまり（セクション）ごとにグループ化します
 func (lc *LogicChunker) SplitIntoLogicBlocks(fn *ast.FuncDecl, lines []string, config *SplitConfig) []*LogicBlock {
-	if config == nil {
-		config = DefaultSplitConfig()
-	}
-
 	blocks := make([]*LogicBlock, 0)
 
 	// 関数本体がない場合は空を返す
@@ -232,69 +228,6 @@ func (lc *LogicChunker) getStatementType(stmt ast.Stmt) string {
 	}
 }
 
-// identifyLogicBlock はステートメントから論理ブロックを識別します
-func (lc *LogicChunker) identifyLogicBlock(stmt ast.Stmt, depth int, comment string) *LogicBlock {
-	startPos := lc.fset.Position(stmt.Pos())
-	endPos := lc.fset.Position(stmt.End())
-
-	block := &LogicBlock{
-		StartPos:  stmt.Pos(),
-		EndPos:    stmt.End(),
-		StartLine: startPos.Line,
-		EndLine:   endPos.Line,
-		Depth:     depth,
-		Comment:   comment,
-	}
-
-	switch s := stmt.(type) {
-	case *ast.IfStmt:
-		// if文：条件分岐
-		block.Type = "conditional"
-		// エラーハンドリングパターンを検出
-		if lc.isErrorHandling(s) {
-			block.Type = "error_handling"
-		}
-
-	case *ast.ForStmt, *ast.RangeStmt:
-		// ループ処理
-		block.Type = "loop"
-
-	case *ast.SwitchStmt, *ast.TypeSwitchStmt:
-		// switch文
-		block.Type = "switch"
-
-	case *ast.SelectStmt:
-		// select文（チャネル操作）
-		block.Type = "channel_select"
-
-	case *ast.DeferStmt:
-		// defer文
-		block.Type = "defer"
-
-	case *ast.ReturnStmt:
-		// return文
-		block.Type = "return"
-
-	case *ast.AssignStmt:
-		// 代入文：初期化パターンを検出
-		if lc.isInitialization(s) {
-			block.Type = "initialization"
-		} else {
-			block.Type = "assignment"
-		}
-
-	case *ast.BlockStmt:
-		// ブロック文
-		block.Type = "block"
-
-	default:
-		// その他のステートメント
-		block.Type = "statement"
-	}
-
-	return block
-}
-
 // isErrorHandling はif文がエラーハンドリングかどうかを判定します
 func (lc *LogicChunker) isErrorHandling(ifStmt *ast.IfStmt) bool {
 	// パターン1: if err != nil
@@ -385,9 +318,9 @@ func (lc *LogicChunker) GenerateLogicChunks(
 		chunkMeta := &ChunkMetadata{
 			Type:       &logicType,
 			Name:       &logicName,
-			ParentName: parentMetadata.Name,  // 親関数名を継承
+			ParentName: parentMetadata.Name,      // 親関数名を継承
 			Signature:  parentMetadata.Signature, // 親関数のシグネチャを継承
-			Level:      3, // レベル3: ロジック単位
+			Level:      3,                        // レベル3: ロジック単位
 		}
 
 		// DocCommentがあれば追加

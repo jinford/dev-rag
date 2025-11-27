@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // HierarchyRepository はチャンク階層関係の読み書きを行うインターフェースです
@@ -13,8 +14,8 @@ type HierarchyRepository interface {
 	AddChunkRelation(ctx context.Context, parentID, childID uuid.UUID, ordinal int) error
 	// GetChildChunkIDs は子チャンクのIDリストを取得します
 	GetChildChunkIDs(ctx context.Context, parentID uuid.UUID) ([]uuid.UUID, error)
-	// GetParentChunkID は親チャンクのIDを取得します
-	GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (*uuid.UUID, error)
+	// GetParentChunkID は親チャンクのIDを取得します（存在しない場合 None）
+	GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (mo.Option[uuid.UUID], error)
 }
 
 // HierarchyBuilder はチャンクの階層構造を構築・検証するユーティリティです
@@ -121,18 +122,19 @@ func (h *HierarchyBuilder) GetPathToRoot(ctx context.Context, chunkID uuid.UUID)
 		visited[current] = true
 
 		// 親チャンクを取得
-		parentID, err := h.repo.GetParentChunkID(ctx, current)
+		parentOpt, err := h.repo.GetParentChunkID(ctx, current)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get parent of %s: %w", current, err)
 		}
 
 		// 親がいない場合はルートに到達
-		if parentID == nil {
+		if parentOpt.IsAbsent() {
 			break
 		}
 
-		path = append(path, *parentID)
-		current = *parentID
+		parentID := parentOpt.MustGet()
+		path = append(path, parentID)
+		current = parentID
 	}
 
 	return path, nil

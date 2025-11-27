@@ -2,7 +2,6 @@ package summary
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -131,14 +130,17 @@ func (s *FileSummarizer) GenerateIfChanged(ctx context.Context, snapshotID uuid.
 	sourceHash := s.hasher.HashFileSource(file.ContentHash)
 
 	// 既存の要約を確認
-	existing, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	existingOpt, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
+	if err != nil {
 		return nil, false, fmt.Errorf("failed to get existing summary: %w", err)
 	}
 
-	if existing != nil && existing.SourceHash == sourceHash {
-		// source_hashが同じなら更新不要
-		return existing, false, nil
+	if existingOpt.IsPresent() {
+		existing := existingOpt.MustGet()
+		if existing.SourceHash == sourceHash {
+			// source_hashが同じなら更新不要
+			return existing, false, nil
+		}
 	}
 
 	// 要約を生成
@@ -208,13 +210,14 @@ func (s *FileSummarizer) Generate(ctx context.Context, snapshotID uuid.UUID, fil
 	}
 
 	// 9. DBに保存（既存があれば更新、なければ作成）
-	existing, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
-	if err != nil && !errors.Is(err, ErrNotFound) {
+	existingOpt, err := s.summaryRepo.GetFileSummary(ctx, snapshotID, file.Path)
+	if err != nil {
 		return nil, fmt.Errorf("failed to check existing summary: %w", err)
 	}
 
 	var saved *Summary
-	if existing != nil {
+	if existingOpt.IsPresent() {
+		existing := existingOpt.MustGet()
 		// 既存の要約を更新
 		existing.Content = summaryContent
 		existing.ContentHash = contentHash

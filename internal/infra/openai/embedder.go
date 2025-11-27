@@ -16,14 +16,51 @@ type Embedder struct {
 	dimension int
 }
 
+const (
+	// DefaultEmbeddingModel はモデル未指定時のデフォルトモデル
+	DefaultEmbeddingModel = "text-embedding-3-small"
+	// DefaultEmbeddingDimension はOpenAI推奨のデフォルト次元
+	DefaultEmbeddingDimension = 1536
+)
+
+type embedderOptions struct {
+	model     string
+	dimension int
+}
+
+// EmbedderOption は Embedder のオプション設定
+type EmbedderOption func(*embedderOptions)
+
+// WithEmbeddingModel はモデル名を上書きする
+func WithEmbeddingModel(model string) EmbedderOption {
+	return func(o *embedderOptions) {
+		o.model = model
+	}
+}
+
+// WithEmbeddingDimension はベクトル次元を上書きする
+func WithEmbeddingDimension(dimension int) EmbedderOption {
+	return func(o *embedderOptions) {
+		o.dimension = dimension
+	}
+}
+
 // NewEmbedder は新しい Embedder を作成する
-func NewEmbedder(apiKey, model string, dimension int) *Embedder {
+func NewEmbedder(apiKey string, opts ...EmbedderOption) *Embedder {
+	options := embedderOptions{
+		model:     DefaultEmbeddingModel,
+		dimension: DefaultEmbeddingDimension,
+	}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	return &Embedder{
 		client: openai.NewClient(
 			option.WithAPIKey(apiKey),
 		),
-		model:     model,
-		dimension: dimension,
+		model:     options.model,
+		dimension: options.dimension,
 	}
 }
 

@@ -2,7 +2,6 @@ package ingestion
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,55 +23,95 @@ type IndexResult struct {
 
 // IndexService はインデックス化のユースケースを提供する
 type IndexService struct {
-	repository      Repository
-	sourceProvider  SourceProvider
-	embedder        Embedder
-	llmClient       wiki.LLMClient // オプショナル
-	chunkerFactory  chunk.ChunkerFactory
-	languageDetect  chunk.LanguageDetector
-	tokenCounter    chunk.TokenCounter
-	chunkerConfig   *chunk.ChunkerConfig
-	pipelineConfig  *PipelineConfig
-	logger          *slog.Logger
+	repository     Repository
+	sourceProvider SourceProvider
+	embedder       Embedder
+	llmClient      wiki.LLMClient // オプショナル
+	chunkerFactory chunk.ChunkerFactory
+	languageDetect chunk.LanguageDetector
+	tokenCounter   chunk.TokenCounter
+	chunkerConfig  *chunk.ChunkerConfig
+	pipelineConfig *PipelineConfig
+	logger         *slog.Logger
 }
 
-// IndexServiceConfig はIndexServiceの設定
-type IndexServiceConfig struct {
-	Repository      Repository
-	SourceProvider  SourceProvider
-	Embedder        Embedder
-	LLMClient       wiki.LLMClient // オプショナル
-	ChunkerFactory  chunk.ChunkerFactory
-	LanguageDetect  chunk.LanguageDetector
-	TokenCounter    chunk.TokenCounter
-	ChunkerConfig   *chunk.ChunkerConfig
-	PipelineConfig  *PipelineConfig
-	Logger          *slog.Logger
+type indexServiceOptions struct {
+	llmClient      wiki.LLMClient
+	chunkerConfig  *chunk.ChunkerConfig
+	pipelineConfig *PipelineConfig
+	logger         *slog.Logger
+}
+
+// IndexServiceOption は IndexService のオプション設定
+type IndexServiceOption func(*indexServiceOptions)
+
+// WithIndexLogger は IndexService にロガーを設定する
+func WithIndexLogger(logger *slog.Logger) IndexServiceOption {
+	return func(o *indexServiceOptions) {
+		o.logger = logger
+	}
+}
+
+// WithIndexLLMClient は LLM クライアントを設定する
+func WithIndexLLMClient(llm wiki.LLMClient) IndexServiceOption {
+	return func(o *indexServiceOptions) {
+		o.llmClient = llm
+	}
+}
+
+// WithIndexChunkerConfig はチャンク設定を上書きする
+func WithIndexChunkerConfig(cfg *chunk.ChunkerConfig) IndexServiceOption {
+	return func(o *indexServiceOptions) {
+		o.chunkerConfig = cfg
+	}
+}
+
+// WithIndexPipelineConfig はパイプライン設定を上書きする
+func WithIndexPipelineConfig(cfg *PipelineConfig) IndexServiceOption {
+	return func(o *indexServiceOptions) {
+		o.pipelineConfig = cfg
+	}
 }
 
 // NewIndexService は新しいIndexServiceを作成する
-func NewIndexService(cfg IndexServiceConfig) *IndexService {
-	if cfg.ChunkerConfig == nil {
-		cfg.ChunkerConfig = chunk.DefaultChunkerConfig()
+func NewIndexService(
+	repo Repository,
+	sourceProvider SourceProvider,
+	embedder Embedder,
+	chunkerFactory chunk.ChunkerFactory,
+	languageDetect chunk.LanguageDetector,
+	tokenCounter chunk.TokenCounter,
+	opts ...IndexServiceOption,
+) *IndexService {
+	options := indexServiceOptions{
+		chunkerConfig:  chunk.DefaultChunkerConfig(),
+		pipelineConfig: DefaultPipelineConfig(),
+		logger:         slog.Default(),
 	}
-	if cfg.PipelineConfig == nil {
-		cfg.PipelineConfig = DefaultPipelineConfig()
+	for _, opt := range opts {
+		opt(&options)
 	}
-	if cfg.Logger == nil {
-		cfg.Logger = slog.Default()
+	if options.logger == nil {
+		options.logger = slog.Default()
+	}
+	if options.chunkerConfig == nil {
+		options.chunkerConfig = chunk.DefaultChunkerConfig()
+	}
+	if options.pipelineConfig == nil {
+		options.pipelineConfig = DefaultPipelineConfig()
 	}
 
 	return &IndexService{
-		repository:     cfg.Repository,
-		sourceProvider: cfg.SourceProvider,
-		embedder:       cfg.Embedder,
-		llmClient:      cfg.LLMClient,
-		chunkerFactory: cfg.ChunkerFactory,
-		languageDetect: cfg.LanguageDetect,
-		tokenCounter:   cfg.TokenCounter,
-		chunkerConfig:  cfg.ChunkerConfig,
-		pipelineConfig: cfg.PipelineConfig,
-		logger:         cfg.Logger,
+		repository:     repo,
+		sourceProvider: sourceProvider,
+		embedder:       embedder,
+		llmClient:      options.llmClient,
+		chunkerFactory: chunkerFactory,
+		languageDetect: languageDetect,
+		tokenCounter:   tokenCounter,
+		chunkerConfig:  options.chunkerConfig,
+		pipelineConfig: options.pipelineConfig,
+		logger:         options.logger,
 	}
 }
 
@@ -125,8 +164,9 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 
 	// 既存のスナップショットをチェック
 	if !params.ForceInit {
-		existingSnapshot, err := s.repository.GetSnapshotByVersion(ctx, source.ID, versionIdentifier)
-		if err == nil && existingSnapshot != nil && existingSnapshot.Indexed {
+		existingSnapshotOpt, err := s.repository.GetSnapshotByVersion(ctx, source.ID, versionIdentifier)
+		if err == nil && existingSnapshotOpt.IsPresent() && existingSnapshotOpt.MustGet().Indexed {
+			existingSnapshot := existingSnapshotOpt.MustGet()
 			s.logger.Info("既にインデックス済みのバージョン",
 				"snapshotID", existingSnapshot.ID,
 				"version", versionIdentifier,
@@ -149,10 +189,14 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 			s.logger.Info("スナップショットが既に存在します。既存のスナップショットを再利用",
 				"version", versionIdentifier,
 			)
-			existingSnapshot, getErr := s.repository.GetSnapshotByVersion(ctx, source.ID, versionIdentifier)
+			existingSnapshotOpt, getErr := s.repository.GetSnapshotByVersion(ctx, source.ID, versionIdentifier)
 			if getErr != nil {
 				return nil, fmt.Errorf("既存スナップショットの取得に失敗: %w", getErr)
 			}
+			if existingSnapshotOpt.IsAbsent() {
+				return nil, fmt.Errorf("既存スナップショットが見つかりませんでした: %s", versionIdentifier)
+			}
+			existingSnapshot := existingSnapshotOpt.MustGet()
 			// 既にインデックス済みの場合はそのまま返す
 			if existingSnapshot.Indexed {
 				return &IndexResult{
@@ -221,107 +265,6 @@ func (s *IndexService) IndexSource(ctx context.Context, params IndexParams) (*In
 	}, nil
 }
 
-// indexDocument は単一のドキュメントをインデックス化する
-func (s *IndexService) indexDocument(ctx context.Context, snapshotID uuid.UUID, doc *SourceDocument, docCtx indexDocumentContext) ([]*Chunk, error) {
-	// 言語を検出
-	language, err := s.languageDetect.DetectLanguage(doc.Path, []byte(doc.Content))
-	if err != nil {
-		s.logger.Debug("言語検出に失敗、デフォルト処理を続行",
-			"path", doc.Path,
-			"error", err,
-		)
-		language = "unknown"
-	}
-
-	// ファイルを作成
-	file, err := s.repository.CreateFile(
-		ctx,
-		snapshotID,
-		doc.Path,
-		doc.Size,
-		"text/plain", // TODO: content typeの適切な検出
-		doc.ContentHash,
-		&language,
-		nil, // domain
-	)
-	if err != nil {
-		return nil, fmt.Errorf("ファイルの作成に失敗: %w", err)
-	}
-
-	// チャンカーを取得
-	chkr, err := s.chunkerFactory.GetChunker(language)
-	if err != nil {
-		return nil, fmt.Errorf("チャンカーの取得に失敗: %w", err)
-	}
-
-	// チャンク化
-	chunkResults, err := chkr.Chunk(ctx, doc.Path, doc.Content)
-	if err != nil {
-		return nil, fmt.Errorf("チャンク化に失敗: %w", err)
-	}
-
-	// チャンクを保存
-	chunks := make([]*Chunk, 0, len(chunkResults))
-	embeddings := make([]*Embedding, 0, len(chunkResults))
-
-	for i, result := range chunkResults {
-		// チャンクメタデータを変換
-		metadata := s.convertChunkMetadata(result.Metadata)
-
-		// ChunkKeyを生成
-		chunkKey := generateChunkKey(docCtx, doc.Path, result.StartLine, result.EndLine, i)
-		metadata.ChunkKey = chunkKey
-
-		// チャンクを作成
-		chunk, err := s.repository.CreateChunk(
-			ctx,
-			file.ID,
-			i,
-			result.StartLine,
-			result.EndLine,
-			result.Content,
-			s.computeContentHash(result.Content),
-			result.Tokens,
-			metadata,
-		)
-		if err != nil {
-			s.logger.Warn("チャンクの作成に失敗",
-				"path", doc.Path,
-				"ordinal", i,
-				"error", err,
-			)
-			continue
-		}
-
-		chunks = append(chunks, chunk)
-
-		// Embeddingを生成
-		vector, err := s.embedder.Embed(ctx, result.Content)
-		if err != nil {
-			s.logger.Warn("Embeddingの生成に失敗",
-				"chunkID", chunk.ID,
-				"error", err,
-			)
-			continue
-		}
-
-		embeddings = append(embeddings, &Embedding{
-			ChunkID: chunk.ID,
-			Vector:  vector,
-			Model:   s.embedder.ModelName(),
-		})
-	}
-
-	// Embeddingをバッチで保存
-	if len(embeddings) > 0 {
-		if err := s.repository.BatchCreateEmbeddings(ctx, embeddings); err != nil {
-			return nil, fmt.Errorf("Embeddingのバッチ作成に失敗: %w", err)
-		}
-	}
-
-	return chunks, nil
-}
-
 // validateParams はインデックス化パラメータをバリデートする
 func (s *IndexService) validateParams(params IndexParams) error {
 	if params.Identifier == "" {
@@ -331,49 +274,6 @@ func (s *IndexService) validateParams(params IndexParams) error {
 		return fmt.Errorf("product name は必須です")
 	}
 	return nil
-}
-
-// convertChunkMetadata は chunk.ChunkMetadata を ingestion.ChunkMetadata に変換する
-func (s *IndexService) convertChunkMetadata(meta *chunk.ChunkMetadata) *ChunkMetadata {
-	if meta == nil {
-		return nil
-	}
-
-	// chunk.ChunkMetadata を ingestion.ChunkMetadata に変換
-	// chunk.ChunkMetadata には UpdatedAt がないため、nil を設定
-	return &ChunkMetadata{
-		Type:                 meta.Type,
-		Name:                 meta.Name,
-		ParentName:           meta.ParentName,
-		Signature:            meta.Signature,
-		DocComment:           meta.DocComment,
-		Imports:              meta.Imports,
-		Calls:                meta.Calls,
-		LinesOfCode:          meta.LinesOfCode,
-		CommentRatio:         meta.CommentRatio,
-		CyclomaticComplexity: meta.CyclomaticComplexity,
-		EmbeddingContext:     meta.EmbeddingContext,
-		Level:                meta.Level,
-		ImportanceScore:      meta.ImportanceScore,
-		StandardImports:      meta.StandardImports,
-		ExternalImports:      meta.ExternalImports,
-		InternalCalls:        meta.InternalCalls,
-		ExternalCalls:        meta.ExternalCalls,
-		TypeDependencies:     meta.TypeDependencies,
-		SourceSnapshotID:     meta.SourceSnapshotID,
-		GitCommitHash:        meta.GitCommitHash,
-		Author:               meta.Author,
-		UpdatedAt:            nil, // chunk.ChunkMetadata にはこのフィールドがない
-		FileVersion:          meta.FileVersion,
-		IsLatest:             meta.IsLatest,
-		ChunkKey:             meta.ChunkKey,
-	}
-}
-
-// computeContentHash はコンテンツのSHA256ハッシュを計算する
-func (s *IndexService) computeContentHash(content string) string {
-	hash := sha256.Sum256([]byte(content))
-	return fmt.Sprintf("%x", hash)
 }
 
 // indexDocumentContext はドキュメントインデックス化のコンテキスト情報

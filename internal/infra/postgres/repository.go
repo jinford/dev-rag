@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/jinford/dev-rag/internal/core/ingestion"
 	"github.com/jinford/dev-rag/internal/infra/postgres/sqlc"
 	pgvector "github.com/pgvector/pgvector-go"
+	"github.com/samber/mo"
 )
 
 // Repository は ingestion.Repository インターフェースを実装する PostgreSQL リポジトリです
@@ -31,40 +33,40 @@ var _ ingestion.Repository = (*Repository)(nil)
 
 // === Product ===
 
-func (r *Repository) GetProductByID(ctx context.Context, id uuid.UUID) (*ingestion.Product, error) {
+func (r *Repository) GetProductByID(ctx context.Context, id uuid.UUID) (mo.Option[*ingestion.Product], error) {
 	product, err := r.q.GetProduct(ctx, UUIDToPgtype(id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("product not found: %s", id)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Product](), nil
 		}
-		return nil, fmt.Errorf("failed to get product: %w", err)
+		return mo.None[*ingestion.Product](), fmt.Errorf("failed to get product: %w", err)
 	}
 
-	return &ingestion.Product{
+	return mo.Some(&ingestion.Product{
 		ID:          PgtypeToUUID(product.ID),
 		Name:        product.Name,
 		Description: PgtextToStringPtr(product.Description),
 		CreatedAt:   PgtypeToTime(product.CreatedAt),
 		UpdatedAt:   PgtypeToTime(product.UpdatedAt),
-	}, nil
+	}), nil
 }
 
-func (r *Repository) GetProductByName(ctx context.Context, name string) (*ingestion.Product, error) {
+func (r *Repository) GetProductByName(ctx context.Context, name string) (mo.Option[*ingestion.Product], error) {
 	product, err := r.q.GetProductByName(ctx, name)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("product not found: %s", name)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Product](), nil
 		}
-		return nil, fmt.Errorf("failed to get product: %w", err)
+		return mo.None[*ingestion.Product](), fmt.Errorf("failed to get product: %w", err)
 	}
 
-	return &ingestion.Product{
+	return mo.Some(&ingestion.Product{
 		ID:          PgtypeToUUID(product.ID),
 		Name:        product.Name,
 		Description: PgtextToStringPtr(product.Description),
 		CreatedAt:   PgtypeToTime(product.CreatedAt),
 		UpdatedAt:   PgtypeToTime(product.UpdatedAt),
-	}, nil
+	}), nil
 }
 
 func (r *Repository) ListProducts(ctx context.Context) ([]*ingestion.Product, error) {
@@ -181,21 +183,21 @@ func (r *Repository) DeleteProduct(ctx context.Context, id uuid.UUID) error {
 
 // === Source ===
 
-func (r *Repository) GetSourceByID(ctx context.Context, id uuid.UUID) (*ingestion.Source, error) {
+func (r *Repository) GetSourceByID(ctx context.Context, id uuid.UUID) (mo.Option[*ingestion.Source], error) {
 	sqlcSource, err := r.q.GetSource(ctx, UUIDToPgtype(id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("source not found: %s", id)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Source](), nil
 		}
-		return nil, fmt.Errorf("failed to get source: %w", err)
+		return mo.None[*ingestion.Source](), fmt.Errorf("failed to get source: %w", err)
 	}
 
-	var metadata ingestion.SourceMetadata
-	if err := json.Unmarshal(sqlcSource.Metadata, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
+    var metadata ingestion.SourceMetadata
+    if err := json.Unmarshal(sqlcSource.Metadata, &metadata); err != nil {
+        return mo.None[*ingestion.Source](), fmt.Errorf("failed to unmarshal metadata: %w", err)
+    }
 
-	return &ingestion.Source{
+	return mo.Some(&ingestion.Source{
 		ID:         PgtypeToUUID(sqlcSource.ID),
 		ProductID:  PgtypeToUUID(sqlcSource.ProductID),
 		Name:       sqlcSource.Name,
@@ -203,24 +205,24 @@ func (r *Repository) GetSourceByID(ctx context.Context, id uuid.UUID) (*ingestio
 		Metadata:   metadata,
 		CreatedAt:  PgtypeToTime(sqlcSource.CreatedAt),
 		UpdatedAt:  PgtypeToTime(sqlcSource.UpdatedAt),
-	}, nil
+	}), nil
 }
 
-func (r *Repository) GetSourceByName(ctx context.Context, name string) (*ingestion.Source, error) {
+func (r *Repository) GetSourceByName(ctx context.Context, name string) (mo.Option[*ingestion.Source], error) {
 	sqlcSource, err := r.q.GetSourceByName(ctx, name)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("source not found: %s", name)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Source](), nil
 		}
-		return nil, fmt.Errorf("failed to get source: %w", err)
+		return mo.None[*ingestion.Source](), fmt.Errorf("failed to get source: %w", err)
 	}
 
-	var metadata ingestion.SourceMetadata
-	if err := json.Unmarshal(sqlcSource.Metadata, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
-	}
+    var metadata ingestion.SourceMetadata
+    if err := json.Unmarshal(sqlcSource.Metadata, &metadata); err != nil {
+        return mo.None[*ingestion.Source](), fmt.Errorf("failed to unmarshal metadata: %w", err)
+    }
 
-	return &ingestion.Source{
+	return mo.Some(&ingestion.Source{
 		ID:         PgtypeToUUID(sqlcSource.ID),
 		ProductID:  PgtypeToUUID(sqlcSource.ProductID),
 		Name:       sqlcSource.Name,
@@ -228,7 +230,7 @@ func (r *Repository) GetSourceByName(ctx context.Context, name string) (*ingesti
 		Metadata:   metadata,
 		CreatedAt:  PgtypeToTime(sqlcSource.CreatedAt),
 		UpdatedAt:  PgtypeToTime(sqlcSource.UpdatedAt),
-	}, nil
+	}), nil
 }
 
 func (r *Repository) ListSourcesByProductID(ctx context.Context, productID uuid.UUID) ([]*ingestion.Source, error) {
@@ -287,45 +289,45 @@ func (r *Repository) CreateSourceIfNotExists(ctx context.Context, name string, s
 
 // === SourceSnapshot ===
 
-func (r *Repository) GetSnapshotByVersion(ctx context.Context, sourceID uuid.UUID, versionIdentifier string) (*ingestion.SourceSnapshot, error) {
+func (r *Repository) GetSnapshotByVersion(ctx context.Context, sourceID uuid.UUID, versionIdentifier string) (mo.Option[*ingestion.SourceSnapshot], error) {
 	sqlcSnapshot, err := r.q.GetSourceSnapshotByVersion(ctx, sqlc.GetSourceSnapshotByVersionParams{
 		SourceID:          UUIDToPgtype(sourceID),
 		VersionIdentifier: versionIdentifier,
 	})
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("snapshot not found: %s@%s", sourceID, versionIdentifier)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.SourceSnapshot](), nil
 		}
-		return nil, fmt.Errorf("failed to get snapshot: %w", err)
+		return mo.None[*ingestion.SourceSnapshot](), fmt.Errorf("failed to get snapshot: %w", err)
 	}
 
-	return &ingestion.SourceSnapshot{
+	return mo.Some(&ingestion.SourceSnapshot{
 		ID:                PgtypeToUUID(sqlcSnapshot.ID),
 		SourceID:          PgtypeToUUID(sqlcSnapshot.SourceID),
 		VersionIdentifier: sqlcSnapshot.VersionIdentifier,
 		Indexed:           sqlcSnapshot.Indexed,
 		IndexedAt:         PgtypeToTimePtr(sqlcSnapshot.IndexedAt),
 		CreatedAt:         PgtypeToTime(sqlcSnapshot.CreatedAt),
-	}, nil
+	}), nil
 }
 
-func (r *Repository) GetLatestIndexedSnapshot(ctx context.Context, sourceID uuid.UUID) (*ingestion.SourceSnapshot, error) {
+func (r *Repository) GetLatestIndexedSnapshot(ctx context.Context, sourceID uuid.UUID) (mo.Option[*ingestion.SourceSnapshot], error) {
 	sqlcSnapshot, err := r.q.GetLatestIndexedSnapshot(ctx, UUIDToPgtype(sourceID))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("no indexed snapshot found for source: %s", sourceID)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.SourceSnapshot](), nil
 		}
-		return nil, fmt.Errorf("failed to get latest indexed snapshot: %w", err)
+		return mo.None[*ingestion.SourceSnapshot](), fmt.Errorf("failed to get latest indexed snapshot: %w", err)
 	}
 
-	return &ingestion.SourceSnapshot{
+	return mo.Some(&ingestion.SourceSnapshot{
 		ID:                PgtypeToUUID(sqlcSnapshot.ID),
 		SourceID:          PgtypeToUUID(sqlcSnapshot.SourceID),
 		VersionIdentifier: sqlcSnapshot.VersionIdentifier,
 		Indexed:           sqlcSnapshot.Indexed,
 		IndexedAt:         PgtypeToTimePtr(sqlcSnapshot.IndexedAt),
 		CreatedAt:         PgtypeToTime(sqlcSnapshot.CreatedAt),
-	}, nil
+	}), nil
 }
 
 func (r *Repository) ListSnapshotsBySource(ctx context.Context, sourceID uuid.UUID) ([]*ingestion.SourceSnapshot, error) {
@@ -383,26 +385,26 @@ func (r *Repository) MarkSnapshotIndexed(ctx context.Context, snapshotID uuid.UU
 
 // === GitRef ===
 
-func (r *Repository) GetGitRefByName(ctx context.Context, sourceID uuid.UUID, refName string) (*ingestion.GitRef, error) {
+func (r *Repository) GetGitRefByName(ctx context.Context, sourceID uuid.UUID, refName string) (mo.Option[*ingestion.GitRef], error) {
 	sqlcRef, err := r.q.GetGitRefByName(ctx, sqlc.GetGitRefByNameParams{
 		SourceID: UUIDToPgtype(sourceID),
 		RefName:  refName,
 	})
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("git ref not found: %s/%s", sourceID, refName)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.GitRef](), nil
 		}
-		return nil, fmt.Errorf("failed to get git ref: %w", err)
+		return mo.None[*ingestion.GitRef](), fmt.Errorf("failed to get git ref: %w", err)
 	}
 
-	return &ingestion.GitRef{
+	return mo.Some(&ingestion.GitRef{
 		ID:         PgtypeToUUID(sqlcRef.ID),
 		SourceID:   PgtypeToUUID(sqlcRef.SourceID),
 		RefName:    sqlcRef.RefName,
 		SnapshotID: PgtypeToUUID(sqlcRef.SnapshotID),
 		CreatedAt:  PgtypeToTime(sqlcRef.CreatedAt),
 		UpdatedAt:  PgtypeToTime(sqlcRef.UpdatedAt),
-	}, nil
+	}), nil
 }
 
 func (r *Repository) ListGitRefsBySource(ctx context.Context, sourceID uuid.UUID) ([]*ingestion.GitRef, error) {
@@ -448,16 +450,16 @@ func (r *Repository) UpsertGitRef(ctx context.Context, sourceID uuid.UUID, refNa
 
 // === File ===
 
-func (r *Repository) GetFileByID(ctx context.Context, id uuid.UUID) (*ingestion.File, error) {
+func (r *Repository) GetFileByID(ctx context.Context, id uuid.UUID) (mo.Option[*ingestion.File], error) {
 	file, err := r.q.GetFile(ctx, UUIDToPgtype(id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("file not found: %s", id)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.File](), nil
 		}
-		return nil, fmt.Errorf("failed to get file: %w", err)
+		return mo.None[*ingestion.File](), fmt.Errorf("failed to get file: %w", err)
 	}
 
-	return &ingestion.File{
+	return mo.Some(&ingestion.File{
 		ID:          PgtypeToUUID(file.ID),
 		SnapshotID:  PgtypeToUUID(file.SnapshotID),
 		Path:        file.Path,
@@ -467,7 +469,7 @@ func (r *Repository) GetFileByID(ctx context.Context, id uuid.UUID) (*ingestion.
 		Language:    PgtextToStringPtr(file.Language),
 		Domain:      PgtextToStringPtr(file.Domain),
 		CreatedAt:   PgtypeToTime(file.CreatedAt),
-	}, nil
+	}), nil
 }
 
 func (r *Repository) ListFilesBySnapshot(ctx context.Context, snapshotID uuid.UUID) ([]*ingestion.File, error) {
@@ -594,16 +596,16 @@ func (r *Repository) DeleteFilesByPaths(ctx context.Context, snapshotID uuid.UUI
 
 // === Chunk ===
 
-func (r *Repository) GetChunkByID(ctx context.Context, id uuid.UUID) (*ingestion.Chunk, error) {
+func (r *Repository) GetChunkByID(ctx context.Context, id uuid.UUID) (mo.Option[*ingestion.Chunk], error) {
 	chunk, err := r.q.GetChunk(ctx, UUIDToPgtype(id))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("chunk not found: %s", id)
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Chunk](), nil
 		}
-		return nil, fmt.Errorf("failed to get chunk: %w", err)
+		return mo.None[*ingestion.Chunk](), fmt.Errorf("failed to get chunk: %w", err)
 	}
 
-	return convertSQLCChunk(chunk), nil
+	return mo.Some(convertSQLCChunk(chunk)), nil
 }
 
 func (r *Repository) ListChunksByFile(ctx context.Context, fileID uuid.UUID) ([]*ingestion.Chunk, error) {
@@ -666,16 +668,29 @@ func (r *Repository) GetChunkChildren(ctx context.Context, parentID uuid.UUID) (
 	return chunks, nil
 }
 
-func (r *Repository) GetChunkParent(ctx context.Context, chunkID uuid.UUID) (*ingestion.Chunk, error) {
+func (r *Repository) GetChunkParent(ctx context.Context, chunkID uuid.UUID) (mo.Option[*ingestion.Chunk], error) {
 	chunk, err := r.q.GetParentChunk(ctx, UUIDToPgtype(chunkID))
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, nil // 親がいない場合
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[*ingestion.Chunk](), nil
 		}
-		return nil, fmt.Errorf("failed to get parent chunk: %w", err)
+		return mo.None[*ingestion.Chunk](), fmt.Errorf("failed to get parent chunk: %w", err)
 	}
 
-	return convertSQLCChunk(chunk), nil
+	return mo.Some(convertSQLCChunk(chunk)), nil
+}
+
+// GetParentChunkID は親チャンクIDを Option で返す
+func (r *Repository) GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (mo.Option[uuid.UUID], error) {
+	parentID, err := r.q.GetParentChunkID(ctx, UUIDToPgtype(chunkID))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
+			return mo.None[uuid.UUID](), nil
+		}
+		return mo.None[uuid.UUID](), fmt.Errorf("failed to get parent chunk id: %w", err)
+	}
+
+	return mo.Some(PgtypeToUUID(parentID)), nil
 }
 
 func (r *Repository) GetChunkTree(ctx context.Context, rootID uuid.UUID, maxDepth int) ([]*ingestion.Chunk, error) {
@@ -692,10 +707,14 @@ func (r *Repository) GetChunkTree(ctx context.Context, rootID uuid.UUID, maxDept
 		}
 		visited[parentID] = true
 
-		parent, err := r.GetChunkByID(ctx, parentID)
+		parentOpt, err := r.GetChunkByID(ctx, parentID)
 		if err != nil {
 			return err
 		}
+		if parentOpt.IsAbsent() {
+			return fmt.Errorf("chunk not found: %s", parentID)
+		}
+		parent := parentOpt.MustGet()
 		result = append(result, parent)
 
 		children, err := r.GetChunkChildren(ctx, parentID)

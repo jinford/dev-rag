@@ -1,13 +1,16 @@
 package ask
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+	"github.com/samber/mo"
+)
 
 // AskParams は質問応答のパラメータを表す
 type AskParams struct {
-	ProductID    *uuid.UUID // プロダクトID
-	Query        string     // ユーザーの質問文
-	ChunkLimit   int        // チャンク検索の上限（デフォルト: 10）
-	SummaryLimit int        // 要約検索の上限（デフォルト: 5）
+	ProductID    mo.Option[uuid.UUID] // プロダクトID
+	Query        string               // ユーザーの質問文
+	ChunkLimit   int                  // チャンク検索の上限（デフォルト: 10）
+	SummaryLimit int                  // 要約検索の上限（デフォルト: 5）
 }
 
 // AskResult は質問応答の結果を表す

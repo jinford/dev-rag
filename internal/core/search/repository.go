@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 )
 
 // Repository は検索関連の全データアクセスを統合するインターフェース
@@ -30,7 +31,7 @@ type Repository interface {
 	GetChunkContext(ctx context.Context, chunkID uuid.UUID, beforeCount int, afterCount int) ([]*ChunkContext, error)
 
 	// GetParentChunk は親チャンクを取得する（階層検索用）
-	GetParentChunk(ctx context.Context, chunkID uuid.UUID) (*ChunkContext, error)
+	GetParentChunk(ctx context.Context, chunkID uuid.UUID) (mo.Option[*ChunkContext], error)
 
 	// GetChildChunks は子チャンクを取得する（階層検索用）
 	GetChildChunks(ctx context.Context, chunkID uuid.UUID) ([]*ChunkContext, error)

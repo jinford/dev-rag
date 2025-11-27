@@ -17,20 +17,40 @@ type SummaryService struct {
 	logger         *slog.Logger
 }
 
+// SummaryServiceOption は SummaryService のオプション設定
+type SummaryServiceOption func(*SummaryService)
+
+// WithSummaryLogger は SummaryService にロガーを設定する
+func WithSummaryLogger(logger *slog.Logger) SummaryServiceOption {
+	return func(s *SummaryService) {
+		s.logger = logger
+	}
+}
+
 // NewSummaryService は新しいSummaryServiceを作成
 func NewSummaryService(
 	ingestionRepo ingestion.Repository,
 	summaryRepo Repository,
 	llm LLMClient,
 	embedder Embedder,
-	logger *slog.Logger,
+	opts ...SummaryServiceOption,
 ) *SummaryService {
-	return &SummaryService{
-		fileSummarizer: NewFileSummarizer(ingestionRepo, summaryRepo, llm, embedder, logger),
-		dirSummarizer:  NewDirectorySummarizer(ingestionRepo, summaryRepo, llm, embedder, logger),
-		archSummarizer: NewArchitectureSummarizer(summaryRepo, llm, embedder, logger),
-		logger:         logger,
+	svc := &SummaryService{
+		logger: slog.Default(),
 	}
+
+	for _, opt := range opts {
+		opt(svc)
+	}
+	if svc.logger == nil {
+		svc.logger = slog.Default()
+	}
+
+	svc.fileSummarizer = NewFileSummarizer(ingestionRepo, summaryRepo, llm, embedder, svc.logger)
+	svc.dirSummarizer = NewDirectorySummarizer(ingestionRepo, summaryRepo, llm, embedder, svc.logger)
+	svc.archSummarizer = NewArchitectureSummarizer(summaryRepo, llm, embedder, svc.logger)
+
+	return svc
 }
 
 // GenerateForSnapshot はスナップショットの全要約を生成（差分更新）

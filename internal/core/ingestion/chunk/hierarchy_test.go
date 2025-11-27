@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/samber/mo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +14,7 @@ import (
 // mockHierarchyRepository はテスト用のモックリポジトリです
 type mockHierarchyRepository struct {
 	relations map[uuid.UUID][]uuid.UUID // parentID -> []childID
-	ordinals  map[string]int             // "parentID:childID" -> ordinal
+	ordinals  map[string]int            // "parentID:childID" -> ordinal
 }
 
 func newMockHierarchyRepository() *mockHierarchyRepository {
@@ -45,16 +46,16 @@ func (m *mockHierarchyRepository) GetChildChunkIDs(ctx context.Context, parentID
 	return children, nil
 }
 
-func (m *mockHierarchyRepository) GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (*uuid.UUID, error) {
+func (m *mockHierarchyRepository) GetParentChunkID(ctx context.Context, chunkID uuid.UUID) (mo.Option[uuid.UUID], error) {
 	// 逆引き: どの親がこのchunkIDを子として持っているか探す
 	for parentID, children := range m.relations {
 		for _, childID := range children {
 			if childID == chunkID {
-				return &parentID, nil
+				return mo.Some(parentID), nil
 			}
 		}
 	}
-	return nil, nil // 親が見つからない場合
+	return mo.None[uuid.UUID](), nil // 親が見つからない場合
 }
 
 // TestLinkParentChild_Success は正常な親子関係の追加をテストします
